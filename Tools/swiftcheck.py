@@ -316,7 +316,9 @@ Keychain SecItemAdd SecItemCopyMatching FileProtectionType
 Speech AVFoundation AVAudioSession AVSpeechSynthesizer AVSpeechUtterance
 MapKit MKMapView MKCoordinateRegion MKPolyline Map MapPolyline MapCameraPosition
 Charts Combine AnyCancellable PassthroughSubject CurrentValueSubject
-Instruments SF Symbols
+Instruments SF Symbols Swift Darwin Dispatch
+NSRegularExpression NSRange NSTextCheckingResult NSDataDetector NSAttributedString
+NSPredicate NSSortDescriptor NSCache NSError NSKeyedArchiver NSKeyedUnarchiver
 CaseIterable ExpressibleByStringLiteral ExpressibleByArrayLiteral ExpressibleByIntegerLiteral
 LosslessStringConvertible AdditiveArithmetic BinaryInteger BinaryFloatingPoint FloatingPoint
 SignedNumeric SignedInteger UnsignedInteger Self Element Value Key Wrapped Bound Output Failure
