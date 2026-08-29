@@ -209,8 +209,12 @@ def collect_declarations(files):
             m = TYPE_DECL.match(code, i)
             if m:
                 name = m.group(2)
+                enclosing = next((owner for owner, _ in reversed(stack) if owner), None)
+                # A nested type is a different type from a same-named one elsewhere,
+                # so duplicates are tracked by qualified name.
+                qualified = f"{enclosing}.{name}" if enclosing else name
                 all_types.add(name)
-                declared_at[name].append((path, line_of(code, i)))
+                declared_at[qualified].append((path, line_of(code, i)))
                 pending_type = name
                 i = m.end()
                 continue
