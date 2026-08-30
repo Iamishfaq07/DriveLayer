@@ -22,17 +22,30 @@ enum AutomaticDetectionStatus: Equatable, Sendable {
     case foregroundOnly
     /// Working as intended.
     case active
+    /// Permitted, and nevertheless not running.
+    ///
+    /// Should be transient: the moment between a permission being granted and updates
+    /// being started. If it persists it is a bug, and the point of having the case is
+    /// that the driver is told so rather than shown "Active" over a service that was
+    /// never started.
+    case permittedButNotStarted
     /// Asked for, and iOS will not allow it.
     case blocked(UnavailabilityReason)
 
-    static func resolve(isEnabled: Bool, authorization: LocationAuthorization) -> AutomaticDetectionStatus {
+    /// - Parameter isReceivingUpdates: whether CoreLocation is actually delivering
+    ///   anything, significant-change monitoring included. Defaults to true so callers
+    ///   reasoning only about permissions read unchanged; the coordinator passes the real
+    ///   value, because permission granted and updates running are different claims.
+    static func resolve(isEnabled: Bool,
+                        authorization: LocationAuthorization,
+                        isReceivingUpdates: Bool = true) -> AutomaticDetectionStatus {
         guard isEnabled else { return .off }
         switch authorization {
         case .notDetermined: return .awaitingPermission
         case .denied: return .blocked(.locationPermissionDenied)
         case .restricted: return .blocked(.locationPermissionDenied)
-        case .whenInUse: return .foregroundOnly
-        case .always: return .active
+        case .whenInUse: return isReceivingUpdates ? .foregroundOnly : .permittedButNotStarted
+        case .always: return isReceivingUpdates ? .active : .permittedButNotStarted
         }
     }
 
@@ -52,6 +65,7 @@ enum AutomaticDetectionStatus: Equatable, Sendable {
         case .awaitingPermission: return "Waiting for permission"
         case .foregroundOnly: return "Only while DriveLayer is open"
         case .active: return "Active"
+        case .permittedButNotStarted: return "Not running"
         case .blocked: return "Needs location permission"
         }
     }
@@ -61,6 +75,9 @@ enum AutomaticDetectionStatus: Equatable, Sendable {
         switch self {
         case .off, .active:
             return nil
+        case .permittedButNotStarted:
+            return "Location access is allowed, but DriveLayer is not receiving updates "
+                + "yet. Reopening the app will start them."
         case .awaitingPermission:
             return "DriveLayer is waiting for you to allow location access."
         case .foregroundOnly:

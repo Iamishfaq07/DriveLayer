@@ -1,6 +1,17 @@
 import Foundation
 import CoreLocation
 
+/// What CoreLocation is doing, as opposed to what was requested of it.
+///
+/// Three states rather than a Boolean because the middle one is real and useful:
+/// significant-change monitoring is not tracking in the drive sense, but it is very much
+/// not off either -- it is the thing that notices a drive starting.
+enum LocationTrackingState: String, Sendable, Equatable {
+    case stopped
+    case significantChange
+    case continuous
+}
+
 /// CoreLocation, behind the core's `LocationProviding` protocol.
 ///
 /// Accuracy is raised and lowered with what the app is doing rather than left at
@@ -12,8 +23,30 @@ final class LocationService: NSObject, LocationProviding {
 
     private(set) var authorization: LocationAuthorization = .notDetermined
     private(set) var latest: GeoPoint?
-    private(set) var fidelity: LocationFidelity = .idle
-    private(set) var isTracking = false
+
+    /// What the app has asked for, whether or not iOS was willing at the time.
+    ///
+    /// Deliberately separate from `trackingState`. A request made before the driver has
+    /// answered the permission prompt is real intent, and it has to survive until it can
+    /// be honoured. One flag doing both jobs is what made a grant arriving after launch
+    /// do nothing: the replay was gated on tracking already being active, which the
+    /// authorization guard had just prevented from happening.
+    private(set) var requestedFidelity: LocationFidelity?
+
+    /// What CoreLocation is actually doing right now.
+    private(set) var trackingState: LocationTrackingState = .stopped
+
+    /// The fidelity currently in force, or `.idle` when nothing is running.
+    var fidelity: LocationFidelity { activeFidelity ?? .idle }
+    private var activeFidelity: LocationFidelity?
+
+    /// Updates are flowing at drive fidelity.
+    var isTracking: Bool { trackingState == .continuous }
+
+    /// Updates of any kind are flowing, significant-change included. This is the honest
+    /// answer to "will a drive be noticed", because significant-change monitoring is
+    /// exactly what notices one.
+    var isMonitoring: Bool { trackingState != .stopped }
 
     private let manager = CLLocationManager()
     // Sendable, and needed from the delegate's nonisolated callbacks, so both are
@@ -52,13 +85,26 @@ final class LocationService: NSObject, LocationProviding {
         Task { @MainActor in
             self.manager.stopUpdatingLocation()
             self.manager.stopMonitoringSignificantLocationChanges()
-            self.isTracking = false
+            // Intent is cleared too: this is the app saying it no longer wants updates,
+            // as distinct from iOS refusing to provide them.
+            self.requestedFidelity = nil
+            self.activeFidelity = nil
+            self.trackingState = .stopped
         }
     }
 
     private func beginUpdates(fidelity: LocationFidelity) {
-        guard authorization.allowsTracking else { return }
-        self.fidelity = fidelity
+        // Recorded before the guard, not after it. Everything below can be refused by
+        // iOS; the request itself cannot, and forgetting it is the bug.
+        requestedFidelity = fidelity
+
+        guard authorization.allowsTracking else {
+            activeFidelity = nil
+            trackingState = .stopped
+            return
+        }
+
+        activeFidelity = fidelity
         manager.distanceFilter = fidelity.distanceFilterMetres
 
         switch fidelity {
@@ -80,7 +126,7 @@ final class LocationService: NSObject, LocationProviding {
             manager.allowsBackgroundLocationUpdates = (fidelity != .idle)
             manager.showsBackgroundLocationIndicator = true
         }
-        isTracking = fidelity != .idle
+        trackingState = fidelity == .idle ? .significantChange : .continuous
     }
 
     private static func map(_ status: CLAuthorizationStatus) -> LocationAuthorization {
@@ -115,8 +161,18 @@ extension LocationService: CLLocationManagerDelegate {
         let status = manager.authorizationStatus
         Task { @MainActor in
             self.authorization = Self.map(status)
-            if self.authorization.allowsTracking, self.isTracking {
-                self.beginUpdates(fidelity: self.fidelity)
+            // Replayed from what was *asked for*, not from whether tracking happens to be
+            // running. The old condition could never be true on the path that mattered: a
+            // request refused for want of permission left tracking stopped, so the grant
+            // arriving seconds later found nothing to resume. The first call at launch is
+            // `.idle`, so this is also what makes drive detection work at all for a driver
+            // who allows location the first time they are asked.
+            if let requested = self.requestedFidelity, self.authorization.allowsTracking {
+                self.beginUpdates(fidelity: requested)
+            } else if !self.authorization.allowsTracking {
+                // Permission withdrawn while running: stop claiming otherwise.
+                self.activeFidelity = nil
+                self.trackingState = .stopped
             }
         }
     }

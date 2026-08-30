@@ -235,7 +235,8 @@ final class DriveSessionCoordinator {
     /// What automatic drive detection is actually doing, permissions included.
     var automaticDetectionStatus: AutomaticDetectionStatus {
         AutomaticDetectionStatus.resolve(isEnabled: settings.automaticTripDetection,
-                                         authorization: location.authorization)
+                                         authorization: location.authorization,
+                                         isReceivingUpdates: location.isMonitoring)
     }
 
     func startDriveManually() {

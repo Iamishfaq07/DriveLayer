@@ -72,4 +72,52 @@ final class AutomaticDetectionStatusTests: XCTestCase {
             XCTAssertNotEqual(status(true, authorization).summary, "Active")
         }
     }
+    // MARK: - Permission granted is not the same as updates running
+
+    func testAlwaysWithoutRunningUpdatesIsNotActive() {
+        let status = AutomaticDetectionStatus.resolve(isEnabled: true,
+                                                     authorization: .always,
+                                                     isReceivingUpdates: false)
+        XCTAssertEqual(status, .permittedButNotStarted)
+        XCTAssertFalse(status.detectsInBackground,
+                       "nothing is watching, so nothing will be detected")
+        XCTAssertFalse(status.needsSettingsApp, "iOS has already granted it; this is ours to fix")
+        XCTAssertNotNil(status.explanation, "and the driver is told rather than shown Active")
+        XCTAssertEqual(status.summary, "Not running")
+    }
+
+    func testAlwaysWithRunningUpdatesIsStillActive() {
+        XCTAssertEqual(AutomaticDetectionStatus.resolve(isEnabled: true,
+                                                       authorization: .always,
+                                                       isReceivingUpdates: true),
+                       .active)
+    }
+
+    func testWhenInUseWithoutRunningUpdatesIsNotForegroundOnly() {
+        // Foreground-only is a promise that it works while the app is open. If updates
+        // are not running it does not, and saying so beats a softer half-truth.
+        XCTAssertEqual(AutomaticDetectionStatus.resolve(isEnabled: true,
+                                                       authorization: .whenInUse,
+                                                       isReceivingUpdates: false),
+                       .permittedButNotStarted)
+    }
+
+    func testARefusedPermissionStillReadsAsBlockedRatherThanNotRunning() {
+        // Ordering matters: a denial is the driver-actionable case and must not be
+        // masked by the newer one.
+        for authorization in [LocationAuthorization.denied, .restricted] {
+            let status = AutomaticDetectionStatus.resolve(isEnabled: true,
+                                                          authorization: authorization,
+                                                          isReceivingUpdates: false)
+            XCTAssertEqual(status, .blocked(.locationPermissionDenied))
+            XCTAssertTrue(status.needsSettingsApp)
+        }
+    }
+
+    func testTheSwitchBeingOffOutranksEverything() {
+        XCTAssertEqual(AutomaticDetectionStatus.resolve(isEnabled: false,
+                                                       authorization: .always,
+                                                       isReceivingUpdates: false),
+                       .off)
+    }
 }
