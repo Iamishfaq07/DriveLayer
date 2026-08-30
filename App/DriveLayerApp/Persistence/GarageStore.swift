@@ -89,6 +89,10 @@ final class GarageStore {
         // StoredDocument.vehicleID is optional, so the predicate needs an optional to
         // compare against rather than relying on promotion.
         let optionalVehicleID: UUID? = vehicleID
+        // Collected before the rows go, because afterwards there is nothing left to say
+        // which files belonged to this vehicle. That is how the scans used to survive:
+        // the metadata was deleted first and took the only reference with it.
+        let documentIDs = documents(vehicleID: vehicleID).map(\.id)
         perform("Deleting the vehicle") {
             try context.delete(model: StoredTrip.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredFuelEntry.self, where: #Predicate { $0.vehicleID == vehicleID })
@@ -100,6 +104,7 @@ final class GarageStore {
             try context.delete(model: StoredVehicle.self, where: #Predicate { $0.id == vehicleID })
         }
         TelemetryFileStore.shared.deleteAll(forVehicle: vehicleID)
+        DocumentFileStore.shared.delete(documentIDs: documentIDs)
     }
 
     // MARK: - Trips
@@ -234,7 +239,20 @@ final class GarageStore {
         }
     }
 
-    /// Drops baseline history older than the retention window the driver chose.
+    /// Discards everything learned about one vehicle, on explicit request.
+    ///
+    /// Not called by retention. See `AppEnvironment.applyRetentionPolicy()`.
+    func deleteBaselines(vehicleID: UUID) {
+        perform("Resetting learned baselines") {
+            try context.delete(model: StoredBaselineAggregate.self,
+                               where: #Predicate { $0.vehicleID == vehicleID })
+        }
+    }
+
+    /// Drops baseline history older than a cutoff.
+    ///
+    /// Retained for the Debug Center and for a future explicit control; deliberately
+    /// **not** wired to the telemetry retention setting any more.
     func pruneBaselines(olderThan cutoff: Date) {
         perform("Pruning baselines") {
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.dayStart < cutoff })

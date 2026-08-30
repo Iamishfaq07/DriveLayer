@@ -8,9 +8,21 @@ name: DriveLayer
 #
 # Note how the sources are split. The app and the widget compile the core sources
 # directly, which means the core needs no `public` annotations and stays readable.
-# The unit tests depend on the Swift package instead, which builds the same sources
-# as a real module so `@testable import` works — and lets `swift test` run the whole
-# suite from the command line, on any machine, without Xcode.
+# The core unit tests depend on the Swift package instead, which builds the same
+# sources as a real module so `@testable import` works — and lets `swift test` run
+# that suite from the command line, on any machine, without Xcode.
+#
+# DriveLayerAppTests is the third target and needs explaining, because it looks
+# redundant next to DriveLayerCoreTests and is not. `swift test` cannot reach the app
+# target at all: SwiftData, CoreLocation, CoreMotion, CoreBluetooth, WidgetKit and
+# UserNotifications are not available to a command-line Swift package build, so the
+# stores, the services and the coordinator had no automated coverage whatsoever — and
+# that is precisely where the reliability bugs were.
+#
+# It compiles the app sources directly rather than importing the app module, so it
+# needs no test host: an app-hosted bundle would mean installing and launching
+# DriveLayer on a simulator to run a test about a database. DriveLayerApp.swift is
+# excluded because a second `@main` in a test bundle is not something to argue with.
 
 options:
   bundleIdPrefix: com.drivelayer
@@ -101,6 +113,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.core.tests
         GENERATE_INFOPLIST_FILE: YES
 
+  DriveLayerAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/DriveLayerAppTests
+      - path: Sources/DriveLayerCore
+      - path: App/Shared
+      - path: App/DriveLayerApp
+        excludes:
+          # Its @main would be a second entry point in the bundle.
+          - "DriveLayerApp.swift"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   DriveLayer:
     build:
@@ -113,6 +141,7 @@ schemes:
       config: Debug
       targets:
         - DriveLayerCoreTests
+        - DriveLayerAppTests
     profile:
       config: Release
     archive:

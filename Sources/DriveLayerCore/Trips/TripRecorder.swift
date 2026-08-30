@@ -36,7 +36,9 @@ enum TripRecorderOutcome: Equatable, Sendable {
     case started(UUID)
     case updated
     case ended(Trip)
-    case discarded(reason: String)
+    /// Carries the id as well as the reason: a discarded drive may already have been
+    /// checkpointed to disk, and the caller needs to know which row to remove.
+    case discarded(id: UUID, reason: String)
 }
 
 /// Decides when a drive starts and stops, and accumulates it.
@@ -245,7 +247,7 @@ struct TripRecorder: Sendable {
         let trip = finished.finish(at: time, reason: reason)
         if trip.distanceMetres < configuration.minimumDistanceMetres
             && trip.totalDurationSeconds < configuration.minimumDurationSeconds {
-            return .discarded(reason: "Too short to be a drive.")
+            return .discarded(id: trip.id, reason: "Too short to be a drive.")
         }
         return .ended(trip)
     }

@@ -42,7 +42,12 @@ enum VehicleProfileCatalog {
         manufacturer: "Tata",
         model: "Harrier",
         generation: "Facelift",
-        firstModelYear: 2025,
+        // The owner's stated model year, which is also what the profile id says. It was
+        // 2025 here and 2026 in the id, and a profile that disagrees with its own
+        // identifier is a profile nobody can check. Recorded as the model year of the
+        // car DriveLayer is being built against rather than as a published launch date,
+        // which is not something to guess at.
+        firstModelYear: 2026,
         lastModelYear: nil,
         trim: "Adventure X+",
         fuelType: .petrol,

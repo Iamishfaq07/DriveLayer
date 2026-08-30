@@ -3,7 +3,9 @@ import SwiftUI
 struct SettingsView: View {
 
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.openURL) private var openURL
     @State private var isConfirmingDeleteAll = false
+    @State private var isConfirmingResetLearning = false
     @State private var exportURL: URL?
     @State private var exportError: String?
 
@@ -25,12 +27,20 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Record drives automatically", isOn: $settings.automaticTripDetection)
+                    .onChange(of: settings.automaticTripDetection) { _, isOn in
+                        // Asking iOS is the point. This used to set a boolean and
+                        // request nothing, so the switch could sit in the on position
+                        // while iOS was refusing the permission the feature needs.
+                        guard isOn else { return }
+                        environment.location.requestAlwaysAuthorization()
+                    }
+                automaticDetectionStatusRows
                 Toggle("Live Activity while driving", isOn: $settings.liveActivitiesEnabled)
                 Toggle("Detect road surface events", isOn: $settings.roadImpactDetectionEnabled)
             } header: {
                 Text("Driving")
             } footer: {
-                Text("Automatic recording needs background location, and iOS will ask you for it. Without it, drives can still be started from the Drive tab.")
+                Text("Automatic recording needs \"Always\" location access. Drives can always be started by hand from the Drive tab, which needs no background permission.")
             }
 
             Section {
@@ -82,12 +92,22 @@ struct SettingsView: View {
                             isPresented: $isConfirmingDeleteAll,
                             titleVisibility: .visible) {
             Button("Delete everything", role: .destructive) {
-                environment.store.deleteEverything()
-                environment.reloadVehicles()
+                // Storage is only part of deleting. See PrivacyDeletion.
+                Task { await PrivacyDeletion.deleteEverything(in: environment) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every vehicle, drive, baseline, fuel entry, document and telemetry file is removed from this device. It cannot be undone.")
+            Text("Every vehicle, drive, baseline, fuel entry, document and telemetry file is removed from this device, the widgets are cleared and pending reminders are cancelled. It cannot be undone.")
+        }
+        .confirmationDialog("Reset what DriveLayer has learned?",
+                            isPresented: $isConfirmingResetLearning,
+                            titleVisibility: .visible) {
+            Button("Reset learning", role: .destructive) {
+                environment.resetLearnedBaselines()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your drives, fuel entries and documents are kept. Only the baselines DriveLayer learned about how this car normally behaves are discarded, and it will start learning again from your next drive.")
         }
         .alert("Export failed",
                isPresented: Binding(get: { exportError != nil },
@@ -101,18 +121,55 @@ struct SettingsView: View {
     private var privacySection: some View {
         @Bindable var settings = environment.settings
         return Section {
-            Picker("Keep engine history for", selection: $settings.telemetryRetentionDays) {
+            Picker("Keep engine samples for", selection: $settings.telemetryRetentionDays) {
                 ForEach(AppSettings.retentionChoices, id: \.self) { days in
-                    Text("\(days) days").tag(days)
+                    Text(days == 0 ? "Keep everything" : "\(days) days").tag(days)
                 }
             }
             .onChange(of: settings.telemetryRetentionDays) { _, _ in
                 environment.applyRetentionPolicy()
             }
+            Text("This is the raw engine data recorded during drives, which is most of what DriveLayer uses disk for. Your drives, fuel entries, documents and everything DriveLayer has learned about the car are kept regardless.")
+                .font(DL.Font.caption)
+                .foregroundStyle(DLColor.secondaryText)
+
+            Button(role: .destructive) {
+                isConfirmingResetLearning = true
+            } label: {
+                Label("Reset learned baselines", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(environment.selectedVehicle == nil)
         } header: {
             Text("Privacy")
         } footer: {
             Text("DriveLayer keeps your data on this device. Nothing is uploaded, nothing is sold, and there is no account. Location is used to record drives and read terrain; documents are stored with full file protection; tokens, coordinates and document numbers are never written to logs.")
+        }
+    }
+
+    /// What automatic detection is actually doing, shown only when it differs from
+    /// what the switch above implies.
+    @ViewBuilder
+    private var automaticDetectionStatusRows: some View {
+        let status = environment.drive.automaticDetectionStatus
+        if status != .off {
+            HStack {
+                Text("Automatic detection")
+                    .font(DL.Font.callout)
+                Spacer()
+                Text(status.summary)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(status.detectsInBackground ? DLColor.normal : DLColor.watch)
+            }
+            if let explanation = status.explanation {
+                Text(explanation)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if status.needsSettingsApp, let url = URL(string: "app-settings:") {
+                Button("Open Settings") { openURL(url) }
+                    .font(DL.Font.callout)
+            }
         }
     }
 

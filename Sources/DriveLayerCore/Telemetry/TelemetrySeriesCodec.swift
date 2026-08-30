@@ -41,7 +41,22 @@ enum TelemetrySeriesCodec {
         .economyKmPerLitre,
         .warmUpDurationSeconds,
         .idleFractionPercent,
-        .tripDistanceKm
+        .tripDistanceKm,
+        // Appended, never inserted. The wire format stores a metric's *index* in this
+        // list, so reordering it would silently reinterpret every telemetry file already
+        // on disk - a coolant temperature read back as a fuel trim.
+        .shortTermFuelTrimPercent,
+        .longTermFuelTrimPercent,
+        .commandedEquivalenceRatio,
+        .fuelRailPressureKPa,
+        .catalystTemperatureC,
+        .ethanolPercent,
+        .barometricPressureKPa,
+        .oilTemperatureC,
+        .absoluteLoadPercent,
+        .acceleratorPedalPercent,
+        .massAirFlowGramsPerSecond,
+        .timingAdvanceDegrees
     ]
 
     /// Quantisation step per metric. Chosen so the full plausible range fits in Int16
@@ -54,6 +69,11 @@ enum TelemetrySeriesCodec {
         case .economyKmPerLitre: return 0.01
         case .warmUpDurationSeconds: return 1.0
         case .tripDistanceKm: return 0.01
+        // Fuel trims are the reason this needs a finer step than the 0.1 default: a
+        // baseline drifting from +1.5% to +3% is the signal, and 0.1% resolution would
+        // quantise most of it away.
+        case .shortTermFuelTrimPercent, .longTermFuelTrimPercent: return 0.01
+        case .commandedEquivalenceRatio: return 0.001
         default: return 0.1
         }
     }

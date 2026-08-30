@@ -58,7 +58,12 @@ final class DriveSessionCoordinator {
     /// twice as the loop re-reads its rolling buffer.
     private var consumedImpactIDs: Set<UUID> = []
 
+    /// Last adapter state the loop saw, so a change can be recorded on the drive.
+    private var lastAdapterConnected: Bool?
+
     private var driveLoop: Task<Void, Never>?
+    /// When the live drive was last written to disk. See `checkpoint(force:now:)`.
+    private var lastCheckpointAt: Date?
     private var lastWeatherFetch: Date?
     /// When the next route lookup may happen. Set *after* an attempt finishes rather
     /// than before it starts, so a failure does not lock the feature out for the whole
@@ -75,6 +80,13 @@ final class DriveSessionCoordinator {
     private var routeWeatherPoints: [RouteWeatherPoint] = []
     private var routePolyline: [GeoPoint] = []
     private let analysisInterval: TimeInterval = 5
+    /// How often the live drive and its telemetry are written to disk.
+    ///
+    /// Twenty seconds: at 1 Hz sampling that is a bounded amount of work per write and
+    /// at most twenty seconds of a drive at risk, against a SwiftData upsert of one row
+    /// plus one small append-only file. Cheap enough to do while driving, frequent
+    /// enough that losing the gap does not matter.
+    private let checkpointInterval: TimeInterval = 20
     private let weatherInterval: TimeInterval = 15 * 60
     /// A failed route lookup is usually a tunnel or a dropped connection, which fixes
     /// itself. Waiting the full weather interval to find that out is too long.
@@ -142,8 +154,11 @@ final class DriveSessionCoordinator {
             let lastActivity = open.routePolyline.last?.timestamp ?? open.startedAt
             if let recovered = TripRecovery.finalise(open, lastKnownActivityAt: lastActivity) {
                 store.save(trip: recovered)
+                // The drive's chunks outlived the process that was writing them.
+                TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: recovered.id)
             } else {
                 store.delete(tripID: open.id)
+                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: open.id)
             }
         }
     }
@@ -152,7 +167,11 @@ final class DriveSessionCoordinator {
 
     func start() {
         guard driveLoop == nil else { return }
-        location.start(fidelity: settings.automaticTripDetection ? .idle : .driving)
+        // Idle regardless of the automatic-detection setting. This used to ask for
+        // full driving accuracy when automatic detection was *off*, which is the
+        // opposite of the intent: nothing is being recorded yet either way, and
+        // setDriveScreenVisible and the recorder raise it when there is a reason to.
+        location.start(fidelity: .idle)
         motion.start()
         driveLoop = Task { [weak self] in
             while !Task.isCancelled {
@@ -176,6 +195,34 @@ final class DriveSessionCoordinator {
         location.start(fidelity: isVisible ? .active : (isRecording ? .driving : .idle))
     }
 
+    /// Drops the drive in progress without saving it.
+    ///
+    /// Distinct from ending it, which persists. Used when the data underneath is being
+    /// deleted: ending would write the drive back out immediately after the deletion
+    /// removed it, and a checkpoint firing mid-deletion would do the same.
+    func abandonActiveDrive() {
+        guard let trip = recorder?.currentTrip else {
+            isRecording = false
+            currentTrip = nil
+            return
+        }
+        isRecording = false
+        currentTrip = nil
+        lastCheckpointAt = nil
+        pendingSamples.removeAll()
+        recorder = vehicle.map { makeRecorder(for: $0) }
+        if let vehicle {
+            TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
+        }
+        LiveActivityController.shared.end()
+    }
+
+    /// What automatic drive detection is actually doing, permissions included.
+    var automaticDetectionStatus: AutomaticDetectionStatus {
+        AutomaticDetectionStatus.resolve(isEnabled: settings.automaticTripDetection,
+                                         authorization: location.authorization)
+    }
+
     func startDriveManually() {
         guard var recorder = recorder else { return }
         handle(recorder.startManually(now: Date()), recorder: &recorder)
@@ -194,16 +241,38 @@ final class DriveSessionCoordinator {
         let point = location.latest
         let telemetry = obd.isConnected ? obd.telemetry : nil
 
-        // Give the barometer an absolute reference the first time GPS altitude is good.
-        if let point, let altitude = point.altitudeMetres, (point.verticalAccuracyMetres ?? 99) < 15 {
-            motion.anchorAltitude(toGPS: altitude)
+        // TripRecorder.noteAdapterConnectionChange existed with no callers, so a drive
+        // recorded nothing about losing live data half way through - which is exactly
+        // what explains a gap in its telemetry when the driver looks at it later.
+        let adapterConnected = obd.isConnected
+        if lastAdapterConnected != adapterConnected {
+            if lastAdapterConnected != nil {
+                recorder.noteAdapterConnectionChange(connected: adapterConnected, at: now)
+            }
+            lastAdapterConnected = adapterConnected
         }
+
+        // Assigned every tick rather than observed: one assignment a second, and it
+        // cannot drift out of step with the setting. The property's didSet no-ops
+        // unless the value actually changed.
+        motion.isImpactDetectionEnabled = settings.roadImpactDetectionEnabled
+
+        let speedKmh = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)
+            ?? point?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
+        motion.currentSpeedKmh = speedKmh
+
+        // Offered, not applied. This used to re-anchor to GPS on every fix with vertical
+        // accuracy under fifteen metres - once a second - which reduced the barometer to
+        // a passthrough for ten metres of GPS noise. AltitudeFusion decides whether a
+        // fix is worth anchoring to, nudging towards, or ignoring.
+        motion.offerGPSAltitude(point?.altitudeMetres,
+                                accuracyMetres: point?.verticalAccuracyMetres,
+                                isStationary: (speedKmh ?? 0) < 3)
+
         if let point {
             gradientCalculator.add(point: point, altitude: motion.latestAltitude)
             motion.currentPoint = point
         }
-        motion.currentSpeedKmh = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)
-            ?? point?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
 
         let outcome = settings.automaticTripDetection
             ? recorder.update(location: point, telemetry: telemetry, now: now)
@@ -216,6 +285,7 @@ final class DriveSessionCoordinator {
         }
         collectRoadImpacts(into: &recorder)
         self.recorder = recorder
+        checkpoint(now: now)
         gradient = gradientCalculator.current
 
         // How far ahead the weather is gets re-measured every tick; the forecast behind
@@ -277,6 +347,16 @@ final class DriveSessionCoordinator {
             LiveActivityController.shared.start(trip: currentTrip,
                                                 vehicleName: vehicle?.nickname ?? "Your vehicle",
                                                 settings: settings)
+            // Written straight from the local recorder rather than through
+            // checkpoint(force:), which looks at `self.recorder` - and `self.recorder`
+            // is not assigned the mutated value until after handle(_:recorder:) returns.
+            // So checkpoint() here found no trip and silently did nothing, which is
+            // exactly the bug this whole change exists to fix. Caught by the first
+            // app-target test written against it.
+            if let started = recorder.currentTrip {
+                lastCheckpointAt = Date()
+                store.save(trip: started)
+            }
         case .updated:
             currentTrip = recorder.currentTrip
         case let .ended(trip):
@@ -293,6 +373,7 @@ final class DriveSessionCoordinator {
             }
             store.save(trip: finished)
             flushTelemetry(for: finished)
+            lastCheckpointAt = nil
             updateOdometer(after: finished)
             motion.clearImpacts()
             consumedImpactIDs.removeAll()
@@ -300,9 +381,17 @@ final class DriveSessionCoordinator {
             LiveActivityController.shared.end()
             clearDestination()
             refreshAnalysis(force: true)
-        case .discarded:
+        case let .discarded(discardedID, _):
             isRecording = false
             currentTrip = nil
+            lastCheckpointAt = nil
+            // A checkpoint may already have persisted this drive. Left behind it would
+            // be an incomplete row, which is exactly what recovery looks for, so the
+            // next launch would "recover" a drive the recorder deliberately threw away.
+            store.delete(tripID: discardedID)
+            if let vehicle {
+                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
+            }
             pendingSamples.removeAll()
             motion.clearImpacts()
             consumedImpactIDs.removeAll()
@@ -346,9 +435,35 @@ final class DriveSessionCoordinator {
         }
     }
 
-    private func flushTelemetry(for trip: Trip) {
+    /// Writes the live drive and its telemetry to disk.
+    ///
+    /// Drives used to be saved only at `.ended` and telemetry only flushed there too,
+    /// so iOS terminating the app during a two-hour drive lost all of it. It also made
+    /// `recoverInterruptedTrips()` unreachable: it looks for incomplete drives, and
+    /// nothing ever wrote one.
+    ///
+    /// Called from the drive loop, on drive start, and from the scene phase changing -
+    /// backgrounding is the last reliable moment before iOS may terminate the app.
+    func checkpoint(force: Bool = false, now: Date = Date()) {
+        guard isRecording, let trip = recorder?.currentTrip else { return }
+        if !force, let last = lastCheckpointAt, now.timeIntervalSince(last) < checkpointInterval {
+            return
+        }
+        lastCheckpointAt = now
+        store.save(trip: trip)
         guard let vehicle, !pendingSamples.isEmpty else { return }
-        TelemetryFileStore.shared.write(samples: pendingSamples, vehicleID: vehicle.id, tripID: trip.id)
+        TelemetryFileStore.shared.appendChunk(samples: pendingSamples,
+                                             vehicleID: vehicle.id,
+                                             tripID: trip.id)
+        pendingSamples.removeAll()
+    }
+
+    /// Compacts a finished drive's chunks into its single file.
+    private func flushTelemetry(for trip: Trip) {
+        guard let vehicle else { return }
+        TelemetryFileStore.shared.finalise(vehicleID: vehicle.id,
+                                           tripID: trip.id,
+                                           appending: pendingSamples)
         pendingSamples.removeAll()
         flushPending()
         reloadBaselines()

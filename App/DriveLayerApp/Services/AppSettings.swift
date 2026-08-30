@@ -62,7 +62,12 @@ final class AppSettings {
 
     /// Retention choices offered in settings. "Keep everything" is deliberately not
     /// the default: telemetry the driver has no use for is a liability, not a feature.
-    static let retentionChoices: [Int] = [30, 90, 180, 365]
+    /// Raw-telemetry retention, in days. `0` means keep everything.
+    ///
+    /// This controls the engine samples on disk and nothing else. Learned baselines are
+    /// kept while the vehicle exists and are reset only on explicit request, so a driver
+    /// reclaiming space no longer loses what DriveLayer knows about the car.
+    static let retentionChoices: [Int] = [30, 90, 180, 365, 0]
 
     private static var localeDefaultUnitSystem: UnitSystem {
         Locale.current.measurementSystem == .metric ? .metric : .imperial

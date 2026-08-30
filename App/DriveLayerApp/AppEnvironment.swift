@@ -103,11 +103,14 @@ final class AppEnvironment {
         drive.select(vehicle: vehicle)
     }
 
+    /// Deletes the selected vehicle and everything that pointed at it.
+    ///
+    /// Goes through `PrivacyDeletion` rather than straight to the store: the scanned
+    /// documents, the reminders about them and the widget content all belong to the
+    /// vehicle too, and deleting the rows alone left all three behind.
     func deleteSelectedVehicle() {
         guard let id = selectedVehicleID else { return }
-        store.delete(vehicleID: id)
-        selectedVehicleID = nil
-        reloadVehicles()
+        Task { await PrivacyDeletion.delete(vehicleID: id, in: self) }
     }
 
     /// Connects to whatever the driver last used: the simulator when it is switched
@@ -156,10 +159,44 @@ final class AppEnvironment {
                        protocolDescription: obd.protocolDescription)
     }
 
-    /// Applies the driver's retention choice. Called at launch and when it changes.
+    /// Applies the driver's retention choice to **raw telemetry**.
+    ///
+    /// This used to call `pruneBaselines` instead, which was backwards in both
+    /// directions at once: choosing a shorter window destroyed the learned baselines -
+    /// the lightweight intelligence model, months in the making - while every raw
+    /// telemetry file stayed on disk untouched.
+    ///
+    /// Baselines are now kept for as long as the vehicle exists. They are small, they
+    /// are the product, and they are only discarded when the driver explicitly asks via
+    /// `resetLearnedBaselines()`.
     func applyRetentionPolicy() {
         let days = settings.telemetryRetentionDays
+        guard days > 0 else { return }   // 0 means keep everything
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
-        store.pruneBaselines(olderThan: cutoff)
+        TelemetryFileStore.shared.deleteCompacted(olderThan: cutoff)
+    }
+
+    /// Discards what DriveLayer has learned about the car, on request.
+    ///
+    /// Separate from telemetry retention on purpose: a driver clearing disk space should
+    /// not silently lose the baselines, and a driver who wants the car re-learned - after
+    /// a repair, say - should not have to delete their history to get it.
+    func resetLearnedBaselines() {
+        guard let id = selectedVehicleID else { return }
+        store.deleteBaselines(vehicleID: id)
+        drive.select(vehicle: selectedVehicle)
+    }
+
+    /// Puts the app back to its just-installed state after a deletion.
+    ///
+    /// `PrivacyDeletion` owns the order; this is only the in-memory part.
+    func resetAfterDeletion(reload: Bool = true) {
+        selectedVehicleID = nil
+        if reload {
+            reloadVehicles()
+        } else {
+            vehicles = []
+            drive.select(vehicle: nil)
+        }
     }
 }

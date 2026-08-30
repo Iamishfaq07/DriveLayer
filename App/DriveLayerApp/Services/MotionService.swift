@@ -19,8 +19,27 @@ final class MotionService: AltitudeProviding {
     private let altimeter = CMAltimeter()
     private let motion = CMMotionManager()
     private var detector = RoadImpactDetector()
-    private var anchorAltitude: Double?
-    private var relativeAtAnchor: Double = 0
+    /// All the altitude judgement, in the core where it is tested.
+    private var fusion = AltitudeFusion()
+
+    /// Whether road-surface detection runs at all.
+    ///
+    /// The setting used to gate only *persistence*, in the coordinator, so switching it
+    /// off still ran 20 Hz device-motion processing and impact classification for a
+    /// whole drive before throwing every result away. Now it stops the sensor.
+    var isImpactDetectionEnabled = true {
+        didSet {
+            guard isRunning, oldValue != isImpactDetectionEnabled else { return }
+            if isImpactDetectionEnabled {
+                beginDeviceMotion()
+            } else {
+                motion.stopDeviceMotionUpdates()
+                detector.reset()
+                recentImpacts.removeAll()
+                deviceMountingConfidence = nil
+            }
+        }
+    }
 
     private nonisolated let continuation: AsyncStream<AltitudeSample>.Continuation
     private nonisolated let stream: AsyncStream<AltitudeSample>
@@ -37,6 +56,18 @@ final class MotionService: AltitudeProviding {
 
     nonisolated var isAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
 
+    /// Height above sea level, or `nil` when no GPS fix has established one yet.
+    ///
+    /// Nil rather than a fallback on purpose: before an anchor exists the only number
+    /// available is "metres since the barometer started", and presenting that under the
+    /// word "altitude" is what the old code did.
+    var absoluteAltitudeMetres: Double? { fusion.absoluteAltitudeMetres }
+
+    /// Change since the barometer started. Always available, always honest.
+    var elevationChangeMetres: Double { fusion.elevationChangeMetres }
+
+    var hasAbsoluteAltitude: Bool { fusion.hasAbsoluteReference }
+
     nonisolated var updates: AsyncStream<AltitudeSample> { stream }
 
     nonisolated func start() {
@@ -52,10 +83,31 @@ final class MotionService: AltitudeProviding {
         }
     }
 
-    /// Anchors relative barometric altitude to a GPS altitude, so the fused value is
-    /// an absolute height that still moves with barometric sensitivity.
-    func anchorAltitude(toGPS altitude: Double) {
-        anchorAltitude = altitude - relativeAtAnchor
+    /// Offers a GPS altitude to the fusion, which decides what to do with it.
+    ///
+    /// Offered rather than applied: the previous version of this took every fix with
+    /// vertical accuracy under fifteen metres and re-anchored to it, once per second,
+    /// which made the published altitude GPS altitude with extra steps. See
+    /// `AltitudeFusion` for what happens instead.
+    func offerGPSAltitude(_ altitude: Double?, accuracyMetres: Double?, isStationary: Bool) {
+        let outcome = fusion.offer(gpsAltitude: altitude,
+                                   accuracyMetres: accuracyMetres,
+                                   isStationary: isStationary)
+        // Anchoring changes the absolute height without any barometer movement, so the
+        // published sample would otherwise be stale until the next barometer reading -
+        // which on a stationary car can be a while.
+        switch outcome {
+        case .anchored, .reAnchored:
+            publishAltitude()
+        case .ignored, .corrected:
+            break
+        }
+    }
+
+    /// Forgets the absolute reference, keeping barometric continuity. Used when the
+    /// vehicle changes.
+    func resetAltitudeReference() {
+        fusion.forgetAnchor()
     }
 
     private func beginUpdates() {
@@ -72,7 +124,13 @@ final class MotionService: AltitudeProviding {
             }
         }
 
-        guard motion.isDeviceMotionAvailable else { return }
+        // The barometer is cheap and always wanted; the 20 Hz accelerometer is neither,
+        // so it only runs when the feature that needs it is switched on.
+        if isImpactDetectionEnabled { beginDeviceMotion() }
+    }
+
+    private func beginDeviceMotion() {
+        guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
         motion.deviceMotionUpdateInterval = 1.0 / 20.0
         motion.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
             guard let self, let motion else { return }
@@ -88,17 +146,18 @@ final class MotionService: AltitudeProviding {
     }
 
     private func applyRelativeAltitude(_ relative: Double) {
-        relativeAtAnchor = relative
-        let absolute = (anchorAltitude ?? 0) + relative
-        let sample = AltitudeSample(altitudeMetres: absolute,
-                                    accuracyMetres: anchorAltitude == nil ? 10 : 3,
-                                    source: anchorAltitude == nil ? .barometricRelative : .fused,
-                                    timestamp: Date())
+        fusion.update(relativeAltitude: relative)
+        publishAltitude()
+    }
+
+    private func publishAltitude() {
+        let sample = fusion.sample(at: Date())
         latestAltitude = sample
         continuation.yield(sample)
     }
 
     private func consume(verticalG: Double) {
+        guard isImpactDetectionEnabled else { return }
         let sample = MotionSample(timestamp: Date(), verticalG: verticalG, speedKmh: currentSpeedKmh)
         if let event = detector.consider(sample, location: currentPoint) {
             recentImpacts.insert(event, at: 0)
