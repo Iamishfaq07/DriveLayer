@@ -41,6 +41,9 @@ enum UnavailabilityReason: Equatable, Sendable {
     /// A route exists but is shorter than the spacing weather is sampled at, so
     /// there is no "ahead" to forecast.
     case routeTooShortForForecast
+    /// Location is permitted, but no fix has arrived yet. Distinct from a permission
+    /// problem: nothing is wrong and there is nothing for the driver to do.
+    case waitingForLocationFix
 
     var title: String {
         switch self {
@@ -57,6 +60,7 @@ enum UnavailabilityReason: Equatable, Sendable {
         case .noDestination: return "No destination set"
         case .routeUnavailable: return "No route available"
         case .routeTooShortForForecast: return "Too close to forecast"
+        case .waitingForLocationFix: return "Finding your location"
         }
     }
 
@@ -88,6 +92,8 @@ enum UnavailabilityReason: Equatable, Sendable {
             return "DriveLayer couldn't work out a road route to there, so it won't guess what the weather is along one."
         case .routeTooShortForForecast:
             return "The drive is short enough that the weather where you are is the weather when you arrive."
+        case .waitingForLocationFix:
+            return "Waiting for a GPS fix. This usually takes a few seconds outdoors."
         }
     }
 }

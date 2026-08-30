@@ -120,4 +120,9 @@ server, and it only happens when a driver asks for it.
 - The destination itself is held as a name and a coordinate, in memory, until the
   driver clears it or the drive ends. It is never written to disk and never leaves
   the device again.
-- With no destination set, none of this runs.
+- The road is looked up again at most every fifteen minutes while a destination is
+  set, and after a failure at most every minute until one succeeds. It is not looked
+  up once per second alongside the rest of the drive loop.
+- With no destination set, none of this runs. The destination is dropped when the
+  drive ends, so lookups stop with it rather than continuing for as long as the app
+  is open.

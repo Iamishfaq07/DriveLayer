@@ -27,12 +27,20 @@ struct MapKitRouteProvider: RouteProviding {
         do {
             response = try await MKDirections(request: request).calculate()
         } catch {
-            let code = (error as NSError).code
-            // MKError.loadingThrottled and .placemarkNotFound both mean "no route
-            // now", not "no route ever"; offline is reported separately so the empty
-            // state can say something a driver can act on.
+            // A bare code is not enough: every error domain numbers its cases from
+            // zero, so an unrelated error carrying code 3 would be reported to the
+            // driver as "offline". The domain has to be checked with it.
             if (error as NSError).domain == NSURLErrorDomain { throw RouteError.offline }
-            if code == MKError.loadingThrottled.rawValue { throw RouteError.offline }
+            // Cast rather than compare a bare code: every error domain numbers its
+            // cases from zero, so an unrelated error carrying code 3 would otherwise be
+            // reported to the driver as "offline". The cast checks the domain for us.
+            //
+            // loadingThrottled means "no route now", not "no route ever", so it is
+            // reported as offline: the empty state then says something a driver can act
+            // on, and the retry comes round in a minute rather than fifteen.
+            if let mapKitError = error as? MKError, mapKitError.code == .loadingThrottled {
+                throw RouteError.offline
+            }
             throw RouteError.noRouteFound
         }
 

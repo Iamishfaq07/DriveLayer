@@ -115,27 +115,38 @@ struct DriveView: View {
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: DL.Spacing.small) {
             SectionLabel(text: "Heading to")
-            Button {
-                isChoosingDestination = true
-            } label: {
-                HStack(spacing: DL.Spacing.small) {
-                    Image(systemName: drive.destination == nil ? "mappin.and.ellipse" : "location.fill")
-                        .foregroundStyle(DLColor.accent)
-                        .accessibilityHidden(true)
-                    Text(drive.destination?.name ?? "Set a destination")
-                        .font(DL.Font.body)
-                        .foregroundStyle(drive.destination == nil ? DLColor.secondaryText : DLColor.primaryText)
-                        .lineLimit(1)
-                    Spacer()
-                    if drive.destination != nil {
-                        Button("Clear") { drive.setDestination(nil) }
-                            .font(DL.Font.callout)
-                            .buttonStyle(.plain)
+            // Two sibling buttons, not one nested in the other's label: SwiftUI gives
+            // a Button's whole label to the Button, so a "Clear" placed inside it
+            // could never be tapped — every tap opened the search sheet instead.
+            HStack(spacing: DL.Spacing.small) {
+                Button {
+                    isChoosingDestination = true
+                } label: {
+                    HStack(spacing: DL.Spacing.small) {
+                        Image(systemName: drive.destination == nil ? "mappin.and.ellipse" : "location.fill")
                             .foregroundStyle(DLColor.accent)
+                            .accessibilityHidden(true)
+                        Text(drive.destination?.name ?? "Set a destination")
+                            .font(DL.Font.body)
+                            .foregroundStyle(drive.destination == nil ? DLColor.secondaryText : DLColor.primaryText)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
                     }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(drive.destination == nil
+                                    ? "Set a destination"
+                                    : "Heading to \(drive.destination?.name ?? ""). Change destination.")
+
+                if drive.destination != nil {
+                    Button("Clear") { drive.setDestination(nil) }
+                        .font(DL.Font.callout)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DLColor.accent)
+                        .accessibilityLabel("Clear destination")
                 }
             }
-            .buttonStyle(.plain)
 
             if drive.destination != nil, let reason = drive.routeUnavailability {
                 Text(reason.message)

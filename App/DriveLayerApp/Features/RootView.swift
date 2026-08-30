@@ -63,8 +63,9 @@ struct RootView: View {
         selection = route.tab
         switch route.tab {
         case .today: todayPath = route.path
+        case .trips: tripsPath = route.path
         case .vehicle: vehiclePath = route.path
-        case .drive, .trips: break // Neither tab has a screen a link can push.
+        case .drive: break // Drive Mode is one screen; there is nothing to push onto it.
         }
     }
 }
