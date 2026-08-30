@@ -208,25 +208,28 @@ final class DriveSessionRecoveryTests: XCTestCase {
 
     func testTelemetryChunksFromAnInterruptedDriveAreRecovered() throws {
         let tripID = UUID()
+        // Hoisted out of the property so the teardown closure below does not have to
+        // capture self.
+        let vehicleID = vehicle.id
         TelemetryFileStore.shared.appendChunk(
             samples: (0..<30).map {
                 TelemetrySample(timestamp: Date().addingTimeInterval(Double($0)),
                                 values: [.engineRPM: 1_500 + Double($0)])
             },
-            vehicleID: vehicle.id,
+            vehicleID: vehicleID,
             tripID: tripID)
 
         // Interrupted: chunks on disk, nothing compacted.
         XCTAssertEqual(TelemetryFileStore.shared.interruptedTrips().filter { $0.tripID == tripID }.count, 1)
 
         // A relaunch compacts it.
-        TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: tripID)
+        TelemetryFileStore.shared.finalise(vehicleID: vehicleID, tripID: tripID)
 
-        XCTAssertEqual(TelemetryFileStore.shared.read(vehicleID: vehicle.id, tripID: tripID).count, 30)
+        XCTAssertEqual(TelemetryFileStore.shared.read(vehicleID: vehicleID, tripID: tripID).count, 30)
         XCTAssertTrue(TelemetryFileStore.shared.interruptedTrips().filter { $0.tripID == tripID }.isEmpty)
 
         addTeardownBlock {
-            TelemetryFileStore.shared.delete(vehicleID: vehicle.id, tripID: tripID)
+            TelemetryFileStore.shared.delete(vehicleID: vehicleID, tripID: tripID)
         }
     }
 }
