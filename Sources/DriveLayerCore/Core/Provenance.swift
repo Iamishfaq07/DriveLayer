@@ -8,8 +8,16 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
     case measured
     /// Derived arithmetically from measured values (e.g. litres from fuel level × tank size).
     case estimated
-    /// Concluded from patterns rather than computed from a reading (e.g. DPF loading risk).
+    /// Concluded from patterns rather than computed from a reading (e.g. particulate
+    /// loading risk from journey lengths).
     case inferred
+    /// Typed in by the driver: a fill-up, an odometer reading, a tank size override.
+    ///
+    /// Worth distinguishing from `measured` in both directions. It is not a sensor
+    /// reading, so DriveLayer should not present it as one — but it is also not a guess,
+    /// and the driver is usually a better source for their own tank size than a
+    /// specification carried over from a different variant.
+    case userEntered
     /// We have no basis for a value. Render as "—", never as 0.
     case unavailable
 
@@ -18,6 +26,7 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         case .measured: return "Measured"
         case .estimated: return "Estimated"
         case .inferred: return "Inferred"
+        case .userEntered: return "You entered this"
         case .unavailable: return "Unavailable"
         }
     }
@@ -28,6 +37,7 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         case .measured: return nil
         case .estimated: return "estimated"
         case .inferred: return "inferred from your driving pattern"
+        case .userEntered: return "from what you entered"
         case .unavailable: return "unavailable"
         }
     }
@@ -38,6 +48,10 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         case .measured: return 1.0
         case .estimated: return 0.8
         case .inferred: return 0.6
+        // As trustworthy as a sensor for the things only the driver knows, and this is
+        // the ceiling rather than the value, so a shaky conclusion built on a typed-in
+        // number is still free to be unconfident about itself.
+        case .userEntered: return 1.0
         case .unavailable: return 0.0
         }
     }

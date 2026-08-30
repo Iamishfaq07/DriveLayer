@@ -91,6 +91,12 @@ enum OBDPIDCatalog {
     /// The standard temperature scaling: one byte with a 40 °C offset.
     private static func temperatureByte(_ data: [UInt8]) -> Double { Double(data[0]) - 40.0 }
 
+    /// Fuel-trim encoding: 0 means -100%, 128 means 0%, 255 means +99.2%.
+    private static func trimByte(_ data: [UInt8]) -> Double { Double(data[0]) / 1.28 - 100.0 }
+
+    /// Equivalence ratio (lambda) encoding used by PIDs 0x24-0x2B and 0x44.
+    private static func equivalenceRatio(_ data: [UInt8]) -> Double { word(data) * 2.0 / 65_536.0 }
+
     private static func makeSupportedPIDsDescriptor(base: UInt8) -> OBDPIDDescriptor {
         OBDPIDDescriptor(
             pid: .current(base),
@@ -199,8 +205,10 @@ enum OBDPIDCatalog {
                          plausibleRange: 0...65535, refresh: .rare,
                          decode: { .number(word($0)) }),
 
+        // Now carries a metric, because estimated boost is MAP minus this and the
+        // subtraction needs both sides in the telemetry snapshot.
         OBDPIDDescriptor(pid: .current(0x33), name: "Barometric pressure", shortName: "Baro",
-                         metric: nil, unitLabel: "kPa", expectedByteCount: 1,
+                         metric: .barometricPressureKPa, unitLabel: "kPa", expectedByteCount: 1,
                          plausibleRange: 0...255, refresh: .slow,
                          decode: { .number(byteA($0)) }),
 
@@ -210,7 +218,7 @@ enum OBDPIDCatalog {
                          decode: { .number(word($0) / 1000.0) }),
 
         OBDPIDDescriptor(pid: .current(0x43), name: "Absolute load value", shortName: "Abs. load",
-                         metric: nil, unitLabel: "%", expectedByteCount: 2,
+                         metric: .absoluteLoadPercent, unitLabel: "%", expectedByteCount: 2,
                          plausibleRange: 0...25700, refresh: .medium,
                          decode: { .number(word($0) * 100.0 / 255.0) }),
 
@@ -240,12 +248,12 @@ enum OBDPIDCatalog {
                          decode: { .text(OBDFuelTypeTable.name(for: $0[0])) }),
 
         OBDPIDDescriptor(pid: .current(0x5A), name: "Relative accelerator pedal position", shortName: "Pedal",
-                         metric: nil, unitLabel: "%", expectedByteCount: 1,
+                         metric: .acceleratorPedalPercent, unitLabel: "%", expectedByteCount: 1,
                          plausibleRange: 0...100, refresh: .fast,
                          decode: { .number(percentByte($0)) }),
 
         OBDPIDDescriptor(pid: .current(0x5C), name: "Engine oil temperature", shortName: "Oil temp",
-                         metric: nil, unitLabel: "°C", expectedByteCount: 1,
+                         metric: .oilTemperatureC, unitLabel: "°C", expectedByteCount: 1,
                          plausibleRange: -40...215, refresh: .medium,
                          decode: { .number(temperatureByte($0)) }),
 
@@ -267,7 +275,109 @@ enum OBDPIDCatalog {
         OBDPIDDescriptor(pid: .current(0x63), name: "Engine reference torque", shortName: "Ref. torque",
                          metric: nil, unitLabel: "N·m", expectedByteCount: 2,
                          plausibleRange: 0...65535, refresh: .rare,
-                         decode: { .number(word($0)) })
+                         decode: { .number(word($0)) }),
+
+        // MARK: - Added for the Hyperion turbo GDI petrol
+        //
+        // Every one of these is a standardised OBD-II parameter. Whether the Hyperion
+        // ECU answers any of them is unknown until the app meets the car: capability
+        // discovery decides, and anything unlisted simply never appears. Nothing here
+        // is a Tata-specific request, and nothing here assumes support.
+
+        // Fuel trims. The single most useful pair on a petrol engine: how far the ECU
+        // is having to correct the mixture, short-term and learned.
+        OBDPIDDescriptor(pid: .current(0x06), name: "Short-term fuel trim, bank 1", shortName: "STFT",
+                         metric: .shortTermFuelTrimPercent, unitLabel: "%", expectedByteCount: 1,
+                         plausibleRange: -100...99.3, refresh: .medium,
+                         decode: { .number(trimByte($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x07), name: "Long-term fuel trim, bank 1", shortName: "LTFT",
+                         metric: .longTermFuelTrimPercent, unitLabel: "%", expectedByteCount: 1,
+                         plausibleRange: -100...99.3, refresh: .medium,
+                         decode: { .number(trimByte($0)) }),
+
+        // Bank 2 is read but not given a metric: this is a four-cylinder engine with one
+        // bank, so a reply here would mean the assumption was wrong, and that is worth
+        // seeing in the Debug Center rather than silently averaging into bank 1.
+        OBDPIDDescriptor(pid: .current(0x08), name: "Short-term fuel trim, bank 2", shortName: "STFT B2",
+                         metric: nil, unitLabel: "%", expectedByteCount: 1,
+                         plausibleRange: -100...99.3, refresh: .slow,
+                         decode: { .number(trimByte($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x09), name: "Long-term fuel trim, bank 2", shortName: "LTFT B2",
+                         metric: nil, unitLabel: "%", expectedByteCount: 1,
+                         plausibleRange: -100...99.3, refresh: .slow,
+                         decode: { .number(trimByte($0)) }),
+
+        // Fuel rail pressure. 0x23 is the direct-injection one and the only one that
+        // could say anything about a GDI high-pressure circuit. A published 350 bar
+        // figure is a specification, not a reading, and never appears as one.
+        OBDPIDDescriptor(pid: .current(0x22), name: "Fuel rail pressure (relative to manifold)",
+                         shortName: "Rail rel.",
+                         metric: nil, unitLabel: "kPa", expectedByteCount: 2,
+                         plausibleRange: 0...5178, refresh: .medium,
+                         decode: { .number(word($0) * 0.079) }),
+
+        OBDPIDDescriptor(pid: .current(0x23), name: "Fuel rail gauge pressure (direct injection)",
+                         shortName: "Rail press.",
+                         metric: .fuelRailPressureKPa, unitLabel: "kPa", expectedByteCount: 2,
+                         plausibleRange: 0...655350, refresh: .medium,
+                         decode: { .number(word($0) * 10.0) }),
+
+        // Lambda. Commanded first, then the sensors that report what was achieved.
+        OBDPIDDescriptor(pid: .current(0x44), name: "Commanded equivalence ratio", shortName: "Cmd. λ",
+                         metric: .commandedEquivalenceRatio, unitLabel: "λ", expectedByteCount: 2,
+                         plausibleRange: 0...2, refresh: .medium,
+                         decode: { .number(equivalenceRatio($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x24), name: "O2 sensor 1 equivalence ratio", shortName: "λ S1",
+                         metric: nil, unitLabel: "λ", expectedByteCount: 4,
+                         plausibleRange: 0...2, refresh: .medium,
+                         decode: { .number(equivalenceRatio($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x25), name: "O2 sensor 2 equivalence ratio", shortName: "λ S2",
+                         metric: nil, unitLabel: "λ", expectedByteCount: 4,
+                         plausibleRange: 0...2, refresh: .medium,
+                         decode: { .number(equivalenceRatio($0)) }),
+
+        // Catalyst temperature. Relevant to aftertreatment on a petrol engine, and one
+        // of the few genuinely standardised windows into it.
+        OBDPIDDescriptor(pid: .current(0x3C), name: "Catalyst temperature, bank 1 sensor 1",
+                         shortName: "Cat. temp",
+                         metric: .catalystTemperatureC, unitLabel: "°C", expectedByteCount: 2,
+                         plausibleRange: -40...6513.5, refresh: .medium,
+                         decode: { .number(word($0) / 10.0 - 40.0) }),
+
+        OBDPIDDescriptor(pid: .current(0x3E), name: "Catalyst temperature, bank 1 sensor 2",
+                         shortName: "Cat. temp 2",
+                         metric: nil, unitLabel: "°C", expectedByteCount: 2,
+                         plausibleRange: -40...6513.5, refresh: .slow,
+                         decode: { .number(word($0) / 10.0 - 40.0) }),
+
+        // Ethanol. The only honest source for an E20 question: what the ECU reports,
+        // never what the pump was labelled or where the car happened to be.
+        OBDPIDDescriptor(pid: .current(0x52), name: "Ethanol fuel percentage", shortName: "Ethanol",
+                         metric: .ethanolPercent, unitLabel: "%", expectedByteCount: 1,
+                         plausibleRange: 0...100, refresh: .rare,
+                         decode: { .number(percentByte($0)) }),
+
+        // How long a fault has actually been present, which is the difference between
+        // "it came on once" and "it has been on for three hundred kilometres".
+        OBDPIDDescriptor(pid: .current(0x4D), name: "Time run with warning light on",
+                         shortName: "MIL time",
+                         metric: nil, unitLabel: "min", expectedByteCount: 2,
+                         plausibleRange: 0...65535, refresh: .slow,
+                         decode: { .number(word($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x4E), name: "Time since codes cleared", shortName: "Since clear",
+                         metric: nil, unitLabel: "min", expectedByteCount: 2,
+                         plausibleRange: 0...65535, refresh: .rare,
+                         decode: { .number(word($0)) }),
+
+        OBDPIDDescriptor(pid: .current(0x30), name: "Warm-ups since codes cleared", shortName: "Warm-ups",
+                         metric: nil, unitLabel: "", expectedByteCount: 1,
+                         plausibleRange: 0...255, refresh: .rare,
+                         decode: { .number(byteA($0)) })
     ]
 }
 

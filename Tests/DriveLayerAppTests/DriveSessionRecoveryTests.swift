@@ -190,7 +190,7 @@ final class DriveSessionRecoveryTests: XCTestCase {
         XCTAssertTrue(store.trips(vehicleID: vehicle.id).isEmpty)
     }
 
-    func testAbandoningADriveLeavesNothingBehind() throws {
+    func testAbandoningADriveStopsRecordingWithoutSavingProgress() throws {
         let coordinator = makeCoordinator()
         coordinator.startDriveManually()
         XCTAssertEqual(store.openTrips(vehicleID: vehicle.id).count, 1)
@@ -199,9 +199,11 @@ final class DriveSessionRecoveryTests: XCTestCase {
 
         XCTAssertFalse(coordinator.isRecording)
         XCTAssertNil(coordinator.currentTrip)
-        // The row is deliberately left for recovery to finalise rather than deleted
-        // here: abandoning is used when the data underneath is going away anyway.
-        XCTAssertNotNil(store.openTrips(vehicleID: vehicle.id).first)
+        // The checkpointed row is deliberately left alone rather than deleted. Abandoning
+        // is used when the storage underneath is about to be removed anyway, and on the
+        // one path where it is not - a vehicle switch - leaving the drive for recovery to
+        // close is better than throwing away the distance already travelled.
+        XCTAssertEqual(store.openTrips(vehicleID: vehicle.id).count, 1)
     }
 
     // MARK: - Telemetry recovery, the brief's test 2 at app level

@@ -347,9 +347,16 @@ final class DriveSessionCoordinator {
             LiveActivityController.shared.start(trip: currentTrip,
                                                 vehicleName: vehicle?.nickname ?? "Your vehicle",
                                                 settings: settings)
-            // Immediately, not at the first interval: a drive that ends badly in its
-            // first twenty seconds should still leave a record that it happened.
-            checkpoint(force: true)
+            // Written straight from the local recorder rather than through
+            // checkpoint(force:), which looks at `self.recorder` - and `self.recorder`
+            // is not assigned the mutated value until after handle(_:recorder:) returns.
+            // So checkpoint() here found no trip and silently did nothing, which is
+            // exactly the bug this whole change exists to fix. Caught by the first
+            // app-target test written against it.
+            if let started = recorder.currentTrip {
+                lastCheckpointAt = Date()
+                store.save(trip: started)
+            }
         case .updated:
             currentTrip = recorder.currentTrip
         case let .ended(trip):

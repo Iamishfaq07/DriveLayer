@@ -166,6 +166,12 @@ final class GarageStoreDeletionTests: XCTestCase {
             TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: tripID)
         }
 
+        // The store writes on a background queue, and `read` is the synchronous call
+        // that drains it. Without this the compacted files do not exist yet and
+        // setAttributes below throws - which is what failed the first time.
+        XCTAssertFalse(TelemetryFileStore.shared.read(vehicleID: vehicle.id, tripID: oldTrip).isEmpty)
+        XCTAssertFalse(TelemetryFileStore.shared.read(vehicleID: vehicle.id, tripID: recentTrip).isEmpty)
+
         // Retention works on file dates, so the old drive's file has to look old.
         let journal = TelemetryJournal(root: try telemetryRoot())
         try FileManager.default.setAttributes(
