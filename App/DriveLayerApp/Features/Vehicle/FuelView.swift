@@ -67,7 +67,7 @@ struct FuelView: View {
     private var trendSection: some View {
         Section("Economy over time") {
             VStack(alignment: .leading, spacing: DL.Spacing.small) {
-                Sparkline(values: economyResults.map(\.kilometresPerLitre).reversed())
+                Sparkline(values: Array(economyResults.map(\.kilometresPerLitre).reversed()))
                 HStack {
                     Text("Full-to-full, \(economyResults.count) interval\(economyResults.count == 1 ? "" : "s")")
                         .font(DL.Font.caption)

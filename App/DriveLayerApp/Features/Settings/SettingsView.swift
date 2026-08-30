@@ -70,7 +70,9 @@ struct SettingsView: View {
         } message: {
             Text("Every vehicle, drive, baseline, fuel entry, document and telemetry file is removed from this device. It cannot be undone.")
         }
-        .alert("Export failed", isPresented: .constant(exportError != nil)) {
+        .alert("Export failed",
+               isPresented: Binding(get: { exportError != nil },
+                                    set: { if !$0 { exportError = nil } })) {
             Button("OK") { exportError = nil }
         } message: {
             Text(exportError ?? "")

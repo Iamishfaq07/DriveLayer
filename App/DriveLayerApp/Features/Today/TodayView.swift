@@ -98,7 +98,7 @@ struct TodayView: View {
     @ViewBuilder
     private var healthCard: some View {
         if let health = drive.health {
-            NavigationLink(destination: VehicleView()) {
+            NavigationLink(destination: VehicleContentView()) {
                 VStack(alignment: .leading, spacing: DL.Spacing.small) {
                     SectionLabel(text: "Vehicle")
                     HStack(spacing: DL.Spacing.small) {

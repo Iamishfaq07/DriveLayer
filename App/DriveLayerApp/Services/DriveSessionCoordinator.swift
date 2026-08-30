@@ -133,19 +133,19 @@ final class DriveSessionCoordinator {
     }
 
     func startDriveManually() {
-        guard var recorder else { return }
+        guard var recorder = recorder else { return }
         handle(recorder.startManually(now: Date()), recorder: &recorder)
         self.recorder = recorder
     }
 
     func endDriveManually() {
-        guard var recorder else { return }
+        guard var recorder = recorder else { return }
         handle(recorder.endManually(now: Date()), recorder: &recorder)
         self.recorder = recorder
     }
 
     private func tick() async {
-        guard var recorder else { return }
+        guard var recorder = recorder else { return }
         let now = Date()
         let point = location.latest
         let telemetry = obd.isConnected ? obd.telemetry : nil
@@ -189,7 +189,9 @@ final class DriveSessionCoordinator {
             gradientCalculator.reset()
             location.start(fidelity: .driving)
             currentTrip = recorder.currentTrip
-            LiveActivityController.shared.start(trip: currentTrip, settings: settings)
+            LiveActivityController.shared.start(trip: currentTrip,
+                                                vehicleName: vehicle?.nickname ?? "Your vehicle",
+                                                settings: settings)
         case .updated:
             currentTrip = recorder.currentTrip
         case let .ended(trip):
@@ -213,7 +215,7 @@ final class DriveSessionCoordinator {
     /// Adds the drive's distance to the odometer so maintenance intervals stay honest
     /// without the driver typing a number in every week.
     private func updateOdometer(after trip: Trip) {
-        guard var vehicle, let existing = vehicle.odometerKm else { return }
+        guard var vehicle = vehicle, let existing = vehicle.odometerKm else { return }
         vehicle.odometerKm = existing + trip.distanceKm
         vehicle.odometerUpdatedAt = trip.endedAt ?? Date()
         self.vehicle = vehicle

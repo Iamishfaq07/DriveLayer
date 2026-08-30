@@ -37,6 +37,11 @@ enum LocationFidelity: String, Codable, CaseIterable, Sendable {
 }
 
 /// Location as DriveLayer needs it. CoreLocation lives behind this in the app target.
+///
+/// Main-actor isolated because every implementation and every consumer is: a
+/// nonisolated protocol here would only mean each conformance has to opt out of the
+/// isolation it actually has.
+@MainActor
 protocol LocationProviding: AnyObject, Sendable {
     var authorization: LocationAuthorization { get }
     func requestAuthorization() async
@@ -47,6 +52,7 @@ protocol LocationProviding: AnyObject, Sendable {
 }
 
 /// Barometric altitude, which is far better than GPS for detecting a climb.
+@MainActor
 protocol AltitudeProviding: AnyObject, Sendable {
     var isAvailable: Bool { get }
     func start()

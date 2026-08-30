@@ -1,28 +1,38 @@
 import SwiftUI
 
-/// Vehicle health, expressed as systems rather than sensors.
+/// The Vehicle tab. Owns the navigation container.
 struct VehicleView: View {
+    var body: some View {
+        NavigationStack {
+            VehicleContentView()
+        }
+    }
+}
+
+/// Vehicle health, expressed as systems rather than sensors.
+///
+/// Split from `VehicleView` so it can also be pushed from Today without nesting one
+/// navigation container inside another.
+struct VehicleContentView: View {
 
     @Environment(AppEnvironment.self) private var environment
 
     private var drive: DriveSessionCoordinator { environment.drive }
 
     var body: some View {
-        NavigationStack {
-            List {
-                if environment.selectedVehicle == nil {
-                    DLUnavailableState(reason: .noVehicleSelected)
-                        .listRowBackground(Color.clear)
-                } else {
-                    headlineSection
-                    systemsSection
-                    connectionSection
-                    manageSection
-                }
+        List {
+            if environment.selectedVehicle == nil {
+                DLUnavailableState(reason: .noVehicleSelected)
+                    .listRowBackground(Color.clear)
+            } else {
+                headlineSection
+                systemsSection
+                connectionSection
+                manageSection
             }
-            .navigationTitle("Vehicle")
-            .refreshable { drive.refreshAnalysis(force: true) }
         }
+        .navigationTitle("Vehicle")
+        .refreshable { drive.refreshAnalysis(force: true) }
     }
 
     @ViewBuilder

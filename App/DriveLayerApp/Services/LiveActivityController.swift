@@ -36,10 +36,10 @@ final class LiveActivityController {
         #endif
     }
 
-    func start(trip: Trip?, settings: AppSettings) {
+    func start(trip: Trip?, vehicleName: String, settings: AppSettings) {
         #if canImport(ActivityKit)
         guard settings.liveActivitiesEnabled, isSupported, activity == nil, let trip else { return }
-        let attributes = DriveActivityAttributes(vehicleName: settings.lastAdapterName ?? "Your vehicle")
+        let attributes = DriveActivityAttributes(vehicleName: vehicleName)
         let state = DriveActivityAttributes.ContentState(distanceKm: trip.distanceKm,
                                                          durationSeconds: trip.totalDurationSeconds,
                                                          vehicleStatusRawValue: SemanticStatus.unknown.rawValue,
