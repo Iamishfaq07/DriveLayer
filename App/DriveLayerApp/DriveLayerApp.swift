@@ -23,6 +23,9 @@ struct DriveLayerApp: App {
                 .task {
                     await environment.bootstrap()
                     environment.applyRetentionPolicy()
+                    // After bootstrap, so the drives the database knows about have been
+                    // loaded and recovered before anything on disk is judged an orphan.
+                    environment.reconcileTelemetryJournals()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Backgrounding is the last reliable moment before iOS may

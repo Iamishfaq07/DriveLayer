@@ -65,6 +65,26 @@ final class TelemetryJournalTests: XCTestCase {
         XCTAssertTrue(journal.interruptedTrips().isEmpty)
     }
 
+    // MARK: - Age
+
+    /// Reconciliation uses this to tell a journal that outlived its process from one being
+    /// written right now. Getting it wrong deletes the drive in progress.
+    func testAJournalReportsWhenItWasLastWritten() {
+        XCTAssertNil(journal.journalLastWrite(vehicleID: vehicleID, tripID: tripID),
+                     "nothing written yet, so there is nothing to date")
+
+        journal.appendChunk(samples(count: 5), vehicleID: vehicleID, tripID: tripID)
+        let written = journal.journalLastWrite(vehicleID: vehicleID, tripID: tripID)
+        XCTAssertNotNil(written)
+        // Wall-clock, not the sample timestamps: the question is when the file was touched,
+        // not what period the telemetry covers.
+        XCTAssertLessThan(abs(Date().timeIntervalSince(written ?? .distantPast)), 60)
+    }
+
+    func testAnUnknownJournalHasNoWriteDate() {
+        XCTAssertNil(journal.journalLastWrite(vehicleID: UUID(), tripID: UUID()))
+    }
+
     // MARK: - Reporting failure
 
     /// The coordinator now clears its buffer only when this returns true, so the return

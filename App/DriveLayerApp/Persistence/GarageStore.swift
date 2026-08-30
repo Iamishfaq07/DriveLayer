@@ -172,6 +172,26 @@ final class GarageStore {
     }
 
     /// Drives that were still open when the app was last terminated.
+    /// A drive by id, whichever vehicle it belongs to.
+    ///
+    /// Reconciliation starts from journal directories on disk, which name a trip id and
+    /// nothing else, so the vehicle-scoped lookups are the wrong shape for it.
+    func trip(id: UUID) -> Trip? {
+        let descriptor = FetchDescriptor<StoredTrip>(predicate: #Predicate { $0.id == id })
+        return decodeAll(fetch(descriptor, description: "Loading a drive"),
+                         description: "Loading a drive") { try $0.value() }.first
+    }
+
+    /// Whether a drive row exists at all, decodable or not.
+    ///
+    /// Deliberately distinct from `trip(id:)`. A row whose payload this build cannot read
+    /// is emphatically not an orphan, and treating it as one would delete the telemetry
+    /// belonging to a drive a later build can still recover.
+    func tripRowExists(id: UUID) -> Bool {
+        let descriptor = FetchDescriptor<StoredTrip>(predicate: #Predicate { $0.id == id })
+        return !fetch(descriptor, description: "Checking for a drive").isEmpty
+    }
+
     func openTrips(vehicleID: UUID) -> [Trip] {
         trips(vehicleID: vehicleID).filter { !$0.isComplete }
     }

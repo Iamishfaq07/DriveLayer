@@ -195,6 +195,20 @@ struct TelemetryJournal: Sendable {
     // MARK: - Recovery
 
     /// Drives with chunks still on disk: the ones interrupted before compaction.
+    /// When a journal was last written to, or nil if it is not there.
+    ///
+    /// Reconciliation needs this to tell a journal that outlived its process from one
+    /// being written right now. Deleting the latter would throw away the drive in progress.
+    func journalLastWrite(vehicleID: UUID, tripID: UUID) -> Date? {
+        let directory = journalURL(vehicleID: vehicleID, tripID: tripID)
+        let files = (try? fileManager.contentsOfDirectory(at: directory,
+                                                         includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let dates = files.compactMap { url -> Date? in
+            try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        return dates.max()
+    }
+
     func interruptedTrips() -> [(vehicleID: UUID, tripID: UUID)] {
         let entries = (try? fileManager.contentsOfDirectory(atPath: journalRoot.path)) ?? []
         return entries.compactMap(Self.parseIdentifiers).sorted { $0.tripID.uuidString < $1.tripID.uuidString }

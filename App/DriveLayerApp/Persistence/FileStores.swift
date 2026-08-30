@@ -118,6 +118,11 @@ final class TelemetryFileStore: @unchecked Sendable {
         queue.async { journal.deleteEverything() }
     }
 
+    func journalLastWrite(vehicleID: UUID, tripID: UUID) -> Date? {
+        guard let journal else { return nil }
+        return queue.sync { journal.journalLastWrite(vehicleID: vehicleID, tripID: tripID) }
+    }
+
     /// Drives whose telemetry was never compacted, because the app did not get to
     /// finish them. Read at launch, alongside the interrupted drives in the database.
     func interruptedTrips() -> [(vehicleID: UUID, tripID: UUID)] {
