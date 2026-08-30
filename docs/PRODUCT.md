@@ -28,6 +28,20 @@ Insights are surfaced on Today and expand to a full screen. Garage, Fuel,
 Maintenance, Glovebox and Settings live behind the Vehicle tab. The Debug Center is
 behind Settings, where a developer will look and a driver will not.
 
+## One car, for now
+
+DriveLayer supports a single vehicle at the moment — a Tata Harrier 1.5 TGDi petrol,
+the only car anything has been checked against. So onboarding states which vehicle it
+is set up for rather than offering a picker, and the Garage shows that car rather than
+a list to switch between. The one exception is a driver with no vehicle at all, who is
+still offered a way to add one: deleting the only car must not leave the app with no
+way back.
+
+Underneath, nothing is narrowed. Every part of the intelligence layer still reads its
+vehicle through `VehicleProfile`, per-vehicle data isolation is intact and tested, and
+the generic profiles remain in the catalog. `SupportedVehicles.offeredProfileIDs` is
+the only thing that decides what a driver may pick.
+
 ## Today
 
 Vehicle health with a one-line explanation; range and fuel; last drive; weather; the

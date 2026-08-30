@@ -17,6 +17,17 @@ the app report capability Level 3.
 
 **No profile currently ships at this tier.**
 
+## What is offered today
+
+DriveLayer is a one-car app for now. `SupportedVehicles.offeredProfileIDs` lists the
+profiles a driver may choose, and it currently holds one: the Tata Harrier below.
+
+The rest of the catalog stays where it is. Narrowing what is *offered* is not the
+same as narrowing what exists — the generic profiles are what a second car will be
+built on, and the generic diesel one is the fixture the Diesel Guardian tests need.
+Adding a car means adding its profile and putting its ID in that list; nothing else
+in the app decides how many vehicles exist.
+
 ### `experimental`
 Model-level specifications are known, but no vehicle-specific telemetry has been
 proven. DriveLayer restricts itself to standard OBD-II data.

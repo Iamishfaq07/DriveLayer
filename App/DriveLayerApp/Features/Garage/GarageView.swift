@@ -7,36 +7,59 @@ struct GarageView: View {
 
     private var formatter: DisplayFormatter { environment.formatter }
 
+    /// DriveLayer supports one car for now, and the driver has it.
+    private var isSingleCar: Bool {
+        SupportedVehicles.isSingleVehicle && environment.vehicles.count <= 1
+    }
+
+    private var footerText: String {
+        isSingleCar
+            ? "DriveLayer is set up for one car at the moment. Everything it learns — drives, baselines, fuel, maintenance and documents — belongs to this vehicle, and support for more cars is coming."
+            : "Each vehicle keeps its own drives, baselines, fuel log, maintenance and documents. Switching cars never mixes one car's history into another's."
+    }
+
     var body: some View {
         List {
-            Section("Your vehicles") {
-                ForEach(environment.vehicles) { vehicle in
-                    Button {
-                        environment.select(vehicleID: vehicle.id)
-                    } label: {
-                        VehicleRow(vehicle: vehicle,
-                                   isSelected: vehicle.id == environment.selectedVehicleID,
-                                   formatter: formatter)
+            // With one supported car there is nothing to switch between, so the list
+            // of vehicles only appears once there is more than one.
+            if !isSingleCar {
+                Section("Your vehicles") {
+                    ForEach(environment.vehicles) { vehicle in
+                        Button {
+                            environment.select(vehicleID: vehicle.id)
+                        } label: {
+                            VehicleRow(vehicle: vehicle,
+                                       isSelected: vehicle.id == environment.selectedVehicleID,
+                                       formatter: formatter)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             if let vehicle = environment.selectedVehicle {
-                Section("Selected vehicle") {
+                Section(isSingleCar ? "Your vehicle" : "Selected vehicle") {
+                    if isSingleCar {
+                        VehicleRow(vehicle: vehicle, isSelected: false, formatter: formatter)
+                    }
                     NavigationLink(destination: EditVehicleView(vehicle: vehicle)) {
                         Label("Edit details", systemImage: "pencil")
                     }
                 }
             }
-            Section {
-                Button {
-                    isAddingVehicle = true
-                } label: {
-                    Label("Add a vehicle", systemImage: "plus")
+            // Offered when there is no car to work with — deleting the only vehicle
+            // must not leave the app with no way back — and whenever more than one
+            // vehicle is supported.
+            if environment.vehicles.isEmpty || !isSingleCar {
+                Section {
+                    Button {
+                        isAddingVehicle = true
+                    } label: {
+                        Label("Add a vehicle", systemImage: "plus")
+                    }
                 }
             }
             Section {
-                Text("Each vehicle keeps its own drives, baselines, fuel log, maintenance and documents. Switching cars never mixes one car's history into another's.")
+                Text(footerText)
                     .font(DL.Font.caption)
                     .foregroundStyle(DLColor.secondaryText)
             }
@@ -100,7 +123,7 @@ struct AddVehicleView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nickname = ""
-    @State private var profileID = VehicleProfileCatalog.harrier2026AdventureXPlusID
+    @State private var profileID = SupportedVehicles.defaultProfileID
     @State private var modelYear = ""
     @State private var registration = ""
     @State private var odometer = ""
@@ -113,9 +136,18 @@ struct AddVehicleView: View {
             Form {
                 Section("Vehicle") {
                     TextField("Name it", text: $nickname)
-                    Picker("Profile", selection: $profileID) {
-                        ForEach(VehicleProfileCatalog.all) { candidate in
-                            Text(candidate.displayName).tag(candidate.id)
+                    if let only = SupportedVehicles.only {
+                        HStack {
+                            Text("Vehicle")
+                            Spacer()
+                            Text(only.displayName)
+                                .foregroundStyle(DLColor.secondaryText)
+                        }
+                    } else {
+                        Picker("Profile", selection: $profileID) {
+                            ForEach(SupportedVehicles.offered) { candidate in
+                                Text(candidate.displayName).tag(candidate.id)
+                            }
                         }
                     }
                     TextField("Model year", text: $modelYear)

@@ -397,6 +397,33 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), harrier.tankCapacitySource)
     }
 
+    // MARK: - Product scope
+
+    /// DriveLayer offers one car at the moment. These pin the scope so that widening
+    /// it is a deliberate edit rather than something that happens by accident.
+    func testOnlyTheReferenceVehicleIsOffered() {
+        XCTAssertEqual(SupportedVehicles.offeredProfileIDs, [harrier.id])
+        XCTAssertTrue(SupportedVehicles.isSingleVehicle)
+        XCTAssertEqual(SupportedVehicles.only?.id, harrier.id)
+    }
+
+    /// A typo in an offered ID would leave the app with an empty picker and no way to
+    /// add a car, which is the kind of failure that only shows up on a device.
+    func testEveryOfferedProfileExistsInTheCatalog() {
+        XCTAssertEqual(SupportedVehicles.offered.count, SupportedVehicles.offeredProfileIDs.count,
+                       "an offered profile ID does not resolve in the catalog")
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: SupportedVehicles.defaultProfileID))
+    }
+
+    /// Narrowing what is offered must not narrow the catalog: the generic profiles
+    /// are what a second car gets built on, and the diesel one is the fixture the
+    /// Diesel Guardian tests depend on.
+    func testCatalogStillCarriesTheProfilesThatAreNotOffered() {
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: VehicleProfileCatalog.genericDieselID))
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: VehicleProfileCatalog.genericPetrolID))
+        XCTAssertGreaterThan(VehicleProfileCatalog.all.count, SupportedVehicles.offered.count)
+    }
+
     func testVehicleDescriptionNeverLeaksIdentifiers() {
         let vehicle = Vehicle(nickname: "Harrier", profileID: harrier.id,
                               registrationNumber: "KA01AB1234", vin: "MAT123456789")

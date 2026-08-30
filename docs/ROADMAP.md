@@ -46,8 +46,9 @@ Environment findings that shaped everything after:
   ranges, three validation tiers, and manufacturer capabilities that cannot carry a
   request unless validated.
 - Tata Harrier 1.5 TGDi Hyperion petrol profile at `experimental`, plus generic diesel and petrol.
-- Garage with multiple vehicles, per-vehicle data isolation, and a delete that
-  genuinely removes trips, baselines, fuel, maintenance, documents and telemetry.
+- Garage scoped to one vehicle for now, with per-vehicle data isolation intact
+  underneath and a delete that genuinely removes trips, baselines, fuel,
+  maintenance, documents and telemetry.
 
 ## Phase 3 — Today dashboard · **Done**
 
@@ -157,7 +158,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 243 tests passing in CI. |
+| **Test execution** | 246 tests passing in CI. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
@@ -167,6 +168,7 @@ Honest list of what is scaffolding rather than working software.
 | **Road impact events** | Detection implemented and tested; events are recorded locally and not yet surfaced in the UI or corroborated across drives. |
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe. The last-drive widget opens the trip list rather than the drive itself — the widget snapshot carries no trip identifier. |
 | **Accessibility on device** | Contrast is enforced by tests and every metric has a spoken label, but nothing has been driven with VoiceOver or at the largest text sizes on real hardware. |
+| **Other vehicles** | Deliberately not offered. The catalog, the profile system and per-vehicle isolation are all built and tested; `SupportedVehicles.offeredProfileIDs` lists the one car a driver may pick, because it is the only one anything has been checked against. |
 | **Watch app** | Not started. |
 
 ## Next up (V1 completion)
