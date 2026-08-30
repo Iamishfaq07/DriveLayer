@@ -5,6 +5,7 @@ import CoreBluetooth
 /// heuristic that recognises an adapter was private to `BluetoothOBDTransport` and the
 /// scanner is a different type entirely. A driver was asked to pick their adapter out of
 /// their headphones, their watch, a television and someone else's tyre sensors.
+@MainActor
 final class AdapterDiscoveryTests: XCTestCase {
 
     private func advertisement(_ localName: String?) -> [String: Any] {

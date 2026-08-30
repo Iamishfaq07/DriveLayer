@@ -318,17 +318,40 @@ that mistake is what left four Hyperion analysers with no callers.
 | # | Item | Status |
 |---|---|---|
 | P0-1 | Logging abstraction | NOT APPLICABLE — iOS and macOS both ship `os`; no Linux target |
-| P0-2 | Confirmed telemetry persistence | PARTIAL — audited, fix pending |
+| P0-2 | Confirmed telemetry persistence | IMPLEMENTED — writes report their result, samples retained on failure |
 | P0-3 | Chunk numbering | IMPLEMENTED — highest sequence + 1, regression tested |
-| P0-4 | Journal reconciliation, orphan handling | PARTIAL — audited, fix pending |
-| P0-5 | Location requested-vs-actual state | PARTIAL — audited, fix pending |
-| P0-6 | GPS freshness before auto-start | PARTIAL — audited, fix pending |
-| P0-7 | Reconnect on any unexpected drop | PARTIAL — audited, fix pending |
-| P0-7b | Wait for `isNotifying` before ready | PARTIAL — audited, fix pending |
-| P0-7c | Filter the pairing screen, validate ELM | PARTIAL — audited, fix pending |
-| P0-8 | SensorGate must never yield to impossible values | PARTIAL — audited, fix pending |
-| P0-9 | Payload versioning and migration | PARTIAL — audited, fix pending |
-| P0-10 | Simulator isolation | PARTIAL — audited, fix pending |
+| P0-4 | Journal reconciliation, orphan handling | IMPLEMENTED — orphans collected at launch, live drives protected |
+| P0-5 | Location requested-vs-actual state | IMPLEMENTED — replay needs a device, see V-3 |
+| P0-6 | GPS freshness before auto-start | IMPLEMENTED — a stale fix cannot start a drive |
+| P0-7 | Reconnect on any unexpected drop | IMPLEMENTED — BLOCKED ON HARDWARE to verify, see V-2 |
+| P0-7b | Wait for `isNotifying` before ready | IMPLEMENTED — BLOCKED ON HARDWARE to verify, see V-1 |
+| P0-7c | Filter the pairing screen | IMPLEMENTED — classifier tested; ELM handshake before storing still outstanding |
+| P0-8 | SensorGate must never yield to impossible values | IMPLEMENTED — yielding gated by reason |
+| P0-9 | Payload versioning and migration | IMPLEMENTED — versioned envelope, unreadable rows kept |
+| P0-10 | Simulator isolation | IMPLEMENTED — separate provenance, barred from baselines and from release builds |
+
+P0 is complete: nine fixed, one not applicable. Every fix is green across the four CI
+jobs. Three carry a caveat that CI cannot remove, and they are written up as procedures in
+[REAL_CAR_VALIDATION.md](REAL_CAR_VALIDATION.md) rather than quietly called done:
+
+- **P0-5** — the tests cover intent surviving a refused start. CoreLocation in a test
+  bundle reports `.notDetermined` and grants nothing, so the replay when permission
+  arrives needs a device (V-3).
+- **P0-7 / P0-7b** — a disconnect with nothing in flight, and a notification subscription
+  confirming late, both need a real peripheral (V-1, V-2).
+- **P0-7c** — the pairing screen now filters, and the classifier is tested. Validating an
+  adapter with an `ATZ`/`ATI` handshake *before* storing it is not done; today a
+  non-adapter is still caught only as a timeout one layer up.
+
+Two follow-ups fall out of this pass rather than being in the brief:
+
+- `Trip.isSimulated`, so a simulated drive is distinguishable in history rather than only
+  in its telemetry provenance. Deliberately deferred: it is a payload shape change, and it
+  needs the version-2 migration that P0-9 has now made possible. Adding it before P0-9
+  would have silently deleted every stored drive, which is exactly the bug P0-9 fixes.
+- A directly asserted test for the coordinator retaining samples when a write fails. The
+  seam exists and the store contract is tested on both outcomes, but driving the
+  coordinator's own retain branch needs the simulator-driven soak harness from P3.
 
 Two P0 findings are worth calling out because they are worse than the brief assumed.
 
