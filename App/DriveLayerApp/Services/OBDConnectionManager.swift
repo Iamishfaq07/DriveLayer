@@ -35,13 +35,26 @@ final class OBDConnectionManager {
     /// often the adapter is polled.
     var isForeground = true
 
+    /// Non-nil while DriveLayer is trying to get a dropped adapter back.
+    private(set) var reconnectAttempt: Int?
+    /// What to tell the driver while that is happening.
+    private(set) var reconnectStatus: String?
+
     private var session: OBDSession?
     private var transport: OBDTransport?
     private var pollingTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private let reconnectPolicy = ReconnectPolicy()
+    /// Set when the driver disconnects on purpose, so supervision does not fight them.
+    private var isIntentionallyDisconnected = false
     private var lastRead: [UInt8: Date] = [:]
     private let maximumIssues = 20
 
     var isConnected: Bool { state.isUsable }
+
+    /// Trying to get a dropped adapter back. The drive keeps recording either way, so
+    /// the UI has to distinguish "gone" from "coming back".
+    var isReconnecting: Bool { reconnectAttempt != nil }
 
     var capabilityLevel: VehicleCapabilityLevel {
         VehicleCapabilityLevel.current(profile: nil, isAdapterConnected: isConnected)
@@ -50,7 +63,11 @@ final class OBDConnectionManager {
     // MARK: - Lifecycle
 
     func connect(source: Source) async {
-        await disconnect()
+        // teardown, not disconnect: disconnect() cancels supervision, and this is the
+        // call supervision itself makes. Cancelling from inside would stop the ladder
+        // after its first attempt.
+        await teardown()
+        isIntentionallyDisconnected = false
         self.source = source
 
         let transport: OBDTransport
@@ -73,6 +90,8 @@ final class OBDConnectionManager {
             adapterIdentity = await session.adapterIdentity
             protocolDescription = await session.protocolDescription
             adapterVoltage = await session.readAdapterVoltage()
+            reconnectAttempt = nil
+            reconnectStatus = nil
             startPolling()
             await refreshTroubleCodes()
         } catch let error as OBDError {
@@ -84,7 +103,8 @@ final class OBDConnectionManager {
         }
     }
 
-    func disconnect() async {
+    /// Drops the connection and everything derived from it, leaving supervision alone.
+    private func teardown() async {
         pollingTask?.cancel()
         pollingTask = nil
         await session?.stop()
@@ -98,10 +118,66 @@ final class OBDConnectionManager {
         lastRead.removeAll()
     }
 
+    /// Disconnects and stops trying to come back. Distinct from a dropped link.
+    func disconnect() async {
+        isIntentionallyDisconnected = true
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempt = nil
+        reconnectStatus = nil
+        await teardown()
+    }
+
     /// Reconnects on the same source, used after a dropped link.
     func reconnect() async {
         guard let source else { return }
         await connect(source: source)
+    }
+
+    /// Keeps trying to get the adapter back, on a backoff, until it returns.
+    ///
+    /// The drive is deliberately untouched. A dropped adapter means the drive continues
+    /// in phone-only mode - distance, terrain, weather and road events all still work -
+    /// so this must never end a trip or start a new one. It restores live engine data
+    /// and nothing else.
+    ///
+    /// `connect(source:)` repeats the whole sequence on each attempt: transport, adapter
+    /// identification, protocol, capability discovery. Capabilities are rediscovered
+    /// rather than reused, because a reconnect may be a different adapter and a stale
+    /// report is how you end up polling PIDs this car never had.
+    private func beginSupervisedReconnect(after error: OBDError) {
+        guard !isIntentionallyDisconnected, source != nil, reconnectTask == nil else { return }
+
+        state = .failed(error)
+        note(error.userMessage)
+
+        reconnectTask = Task { [weak self] in
+            var attempt = 1
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard let delay = self.reconnectPolicy.delay(forAttempt: attempt) else {
+                    self.reconnectAttempt = nil
+                    self.reconnectStatus = self.reconnectPolicy.statusDescription(attempt: attempt)
+                    return
+                }
+
+                self.reconnectAttempt = attempt
+                self.reconnectStatus = self.reconnectPolicy.statusDescription(attempt: attempt)
+
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled,
+                      !self.isIntentionallyDisconnected,
+                      let source = self.source else { return }
+
+                await self.connect(source: source)
+                if self.isConnected {
+                    self.note("Adapter reconnected after \(attempt) attempt(s).")
+                    self.reconnectTask = nil
+                    return
+                }
+                attempt += 1
+            }
+        }
     }
 
     // MARK: - Polling
@@ -142,8 +218,8 @@ final class OBDConnectionManager {
             } catch let error as OBDError {
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
                 if case .connectionLost = error {
-                    state = .failed(.connectionLost)
-                    note(error.userMessage)
+                    // Supervised, not abandoned. The drive carries on phone-only.
+                    beginSupervisedReconnect(after: .connectionLost)
                     return
                 }
                 if !error.suggestsUnsupported {

@@ -58,6 +58,9 @@ final class DriveSessionCoordinator {
     /// twice as the loop re-reads its rolling buffer.
     private var consumedImpactIDs: Set<UUID> = []
 
+    /// Last adapter state the loop saw, so a change can be recorded on the drive.
+    private var lastAdapterConnected: Bool?
+
     private var driveLoop: Task<Void, Never>?
     /// When the live drive was last written to disk. See `checkpoint(force:now:)`.
     private var lastCheckpointAt: Date?
@@ -238,16 +241,38 @@ final class DriveSessionCoordinator {
         let point = location.latest
         let telemetry = obd.isConnected ? obd.telemetry : nil
 
-        // Give the barometer an absolute reference the first time GPS altitude is good.
-        if let point, let altitude = point.altitudeMetres, (point.verticalAccuracyMetres ?? 99) < 15 {
-            motion.anchorAltitude(toGPS: altitude)
+        // TripRecorder.noteAdapterConnectionChange existed with no callers, so a drive
+        // recorded nothing about losing live data half way through - which is exactly
+        // what explains a gap in its telemetry when the driver looks at it later.
+        let adapterConnected = obd.isConnected
+        if lastAdapterConnected != adapterConnected {
+            if lastAdapterConnected != nil {
+                recorder.noteAdapterConnectionChange(connected: adapterConnected, at: now)
+            }
+            lastAdapterConnected = adapterConnected
         }
+
+        // Assigned every tick rather than observed: one assignment a second, and it
+        // cannot drift out of step with the setting. The property's didSet no-ops
+        // unless the value actually changed.
+        motion.isImpactDetectionEnabled = settings.roadImpactDetectionEnabled
+
+        let speedKmh = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)
+            ?? point?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
+        motion.currentSpeedKmh = speedKmh
+
+        // Offered, not applied. This used to re-anchor to GPS on every fix with vertical
+        // accuracy under fifteen metres - once a second - which reduced the barometer to
+        // a passthrough for ten metres of GPS noise. AltitudeFusion decides whether a
+        // fix is worth anchoring to, nudging towards, or ignoring.
+        motion.offerGPSAltitude(point?.altitudeMetres,
+                                accuracyMetres: point?.verticalAccuracyMetres,
+                                isStationary: (speedKmh ?? 0) < 3)
+
         if let point {
             gradientCalculator.add(point: point, altitude: motion.latestAltitude)
             motion.currentPoint = point
         }
-        motion.currentSpeedKmh = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)
-            ?? point?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
 
         let outcome = settings.automaticTripDetection
             ? recorder.update(location: point, telemetry: telemetry, now: now)

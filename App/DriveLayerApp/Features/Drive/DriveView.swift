@@ -91,11 +91,11 @@ struct DriveView: View {
                        value: formatter.duration(seconds: drive.currentTrip?.totalDurationSeconds),
                        unit: nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            MetricView(label: "Altitude",
-                       value: environment.motion.latestAltitude.map { String(Int($0.altitudeMetres.rounded())) }
-                            ?? environment.location.latest?.altitudeMetres.map { String(Int($0.rounded())) },
-                       unit: "m",
-                       provenance: environment.motion.latestAltitude == nil ? .measured : .estimated)
+            // Two different quantities, and the label has to say which one this is.
+            // Before a GPS fix anchors the barometer, the only figure available is the
+            // change since it started - which was previously shown as "Altitude", so a
+            // reading of 7 m meant "7 m since the app launched".
+            altitudeMetric
                 .frame(maxWidth: .infinity, alignment: .leading)
             MetricView(label: "Range",
                        value: formatter.distance(kilometres: drive.fuelStatus.estimatedRangeKm.value, fractionDigits: 0),
@@ -162,6 +162,31 @@ struct DriveView: View {
                 drive.setDestination(destination)
                 isChoosingDestination = false
             }
+        }
+    }
+
+    /// Height above sea level once that is known, and the climb so far until it is.
+    @ViewBuilder
+    private var altitudeMetric: some View {
+        let motion = environment.motion
+        if let absolute = motion.absoluteAltitudeMetres {
+            MetricView(label: "Altitude",
+                       value: String(Int(absolute.rounded())),
+                       unit: "m",
+                       provenance: .estimated)
+        } else if motion.isRunning {
+            let change = motion.elevationChangeMetres
+            MetricView(label: "Elevation change",
+                       value: (change >= 0 ? "+" : "") + String(Int(change.rounded())),
+                       unit: "m",
+                       provenance: .measured)
+        } else if let satellite = environment.location.latest?.altitudeMetres {
+            MetricView(label: "Altitude",
+                       value: String(Int(satellite.rounded())),
+                       unit: "m",
+                       provenance: .measured)
+        } else {
+            MetricView(label: "Altitude", value: nil, unit: "m", provenance: .unavailable)
         }
     }
 
