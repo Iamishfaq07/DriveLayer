@@ -45,7 +45,8 @@ final class AppEnvironment {
                                              location: location,
                                              motion: motion,
                                              settings: settings,
-                                             weather: AppEnvironment.makeWeatherProvider(settings: settings))
+                                             weather: AppEnvironment.makeWeatherProvider(settings: settings),
+                                             route: AppEnvironment.makeRouteProvider(settings: settings))
         self.drive.reminders = reminders
         AppEnvironment.active = self
     }
@@ -54,6 +55,13 @@ final class AppEnvironment {
     /// simulation, and the Debug Center labels it as mocked wherever it appears.
     private static func makeWeatherProvider(settings: AppSettings) -> WeatherProviding {
         settings.useSimulator ? MockWeatherProvider(scenario: .rainAhead) : WeatherKitProvider()
+    }
+
+    /// Under simulation a straight line stands in for a road, so the route-weather
+    /// pipeline can be exercised without MapKit. It is never offered to a driver as
+    /// though it were real routing — `StraightLineRouteProvider` says as much.
+    private static func makeRouteProvider(settings: AppSettings) -> RouteProviding {
+        settings.useSimulator ? StraightLineRouteProvider() : MapKitRouteProvider()
     }
 
     var selectedVehicle: Vehicle? {
@@ -108,6 +116,7 @@ final class AppEnvironment {
         if settings.useSimulator {
             await obd.connect(source: .simulator(settings.simulatorScenario))
             drive.setWeatherProvider(MockWeatherProvider(scenario: .rainAhead))
+            drive.setRouteProvider(StraightLineRouteProvider())
             return
         }
         guard let identifier = settings.lastAdapterIdentifier, let uuid = UUID(uuidString: identifier) else { return }
@@ -120,6 +129,7 @@ final class AppEnvironment {
         settings.lastAdapterIdentifier = id.uuidString
         settings.lastAdapterName = name
         drive.setWeatherProvider(WeatherKitProvider())
+        drive.setRouteProvider(MapKitRouteProvider())
         await obd.connect(source: .bluetooth(peripheralID: id, name: name))
         rememberConnectedAdapter()
     }
@@ -128,6 +138,7 @@ final class AppEnvironment {
         settings.useSimulator = true
         settings.simulatorScenario = scenario
         drive.setWeatherProvider(MockWeatherProvider(scenario: .rainAhead))
+        drive.setRouteProvider(StraightLineRouteProvider())
         await obd.connect(source: .simulator(scenario))
     }
 

@@ -10,6 +10,7 @@ struct DriveView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var isShowingTelemetry = false
     @State private var isShowingCopilot = false
+    @State private var isChoosingDestination = false
 
     private var drive: DriveSessionCoordinator { environment.drive }
     private var formatter: DisplayFormatter { environment.formatter }
@@ -25,6 +26,7 @@ struct DriveView: View {
                 VStack(alignment: .leading, spacing: DL.Spacing.large) {
                     speedBlock
                     tripRow
+                    destinationSection
                     contextSection
                     controls
                 }
@@ -107,6 +109,54 @@ struct DriveView: View {
     /// The part that makes this Drive Mode rather than a speedometer: at most three
     /// pieces of context, urgent first, and nothing at all when there is nothing to say.
     @ViewBuilder
+    /// Where the driver is going, and what the weather does on the way.
+    ///
+    /// Optional and off by default. DriveLayer is not a navigation app; it asks for a
+    /// destination only because "rain in 14 km" needs to know which 14 km, and
+    /// looking up a route is the one thing here that sends a location off the device.
+    @ViewBuilder
+    private var destinationSection: some View {
+        VStack(alignment: .leading, spacing: DL.Spacing.small) {
+            SectionLabel(text: "Heading to")
+            Button {
+                isChoosingDestination = true
+            } label: {
+                HStack(spacing: DL.Spacing.small) {
+                    Image(systemName: drive.destination == nil ? "mappin.and.ellipse" : "location.fill")
+                        .foregroundStyle(DLColor.accent)
+                        .accessibilityHidden(true)
+                    Text(drive.destination?.name ?? "Set a destination")
+                        .font(DL.Font.body)
+                        .foregroundStyle(drive.destination == nil ? DLColor.secondaryText : DLColor.primaryText)
+                        .lineLimit(1)
+                    Spacer()
+                    if drive.destination != nil {
+                        Button("Clear") { drive.setDestination(nil) }
+                            .font(DL.Font.callout)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DLColor.accent)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if drive.destination != nil, let reason = drive.routeUnavailability {
+                Text(reason.message)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dlCard()
+        .sheet(isPresented: $isChoosingDestination) {
+            DestinationSearchView { destination in
+                drive.setDestination(destination)
+                isChoosingDestination = false
+            }
+        }
+    }
+
     private var contextSection: some View {
         let visible = InsightEngine.forDriving(drive.insights)
         if visible.isEmpty {

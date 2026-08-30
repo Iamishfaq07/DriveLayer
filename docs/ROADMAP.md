@@ -158,12 +158,12 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 252 tests passing in CI. |
+| **Test execution** | 257 tests passing in CI. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
 | **Elevation provider** | Protocol plus an honest mock. No real elevation source is bundled, so terrain-ahead is only live with a provider configured. |
-| **Route weather** | Analyser and waypoint builder are done and tested; nothing yet supplies a route, so it needs a destination or navigation integration to fire. |
+| **Route weather** | Working end to end. A driver sets a destination in Drive Mode, MapKit supplies the road, and the forecast is read at 10 km intervals for the hour the driver is expected at each. Needs WeatherKit configured to return anything. |
 | **Document scanning** | Capture and on-device recognition are wired to the tested extractor. Compiled in CI; not yet exercised against a real document on hardware. |
 | **Road impact events** | Detected, persisted per vehicle, and shown on the drive they happened on. Not corroborated across drives or drivers, so they are never called potholes and never escalate past `watch`. |
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe, the last-drive widget included — it links to "my last drive" rather than an identifier, so the app resolves which drive that is as it opens. |

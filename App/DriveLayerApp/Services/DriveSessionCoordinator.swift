@@ -26,6 +26,9 @@ final class DriveSessionCoordinator {
     private(set) var currentWeather: WeatherSnapshot?
     private(set) var weatherChanges: [WeatherChange] = []
     private(set) var weatherUnavailability: UnavailabilityReason?
+    /// Where the driver said they are going, if anywhere.
+    private(set) var destination: RouteDestination?
+    private(set) var routeUnavailability: UnavailabilityReason?
     private(set) var isRecording = false
     private(set) var lastAnalysisAt: Date?
 
@@ -38,6 +41,7 @@ final class DriveSessionCoordinator {
     private let motion: MotionService
     private let settings: AppSettings
     private var weather: WeatherProviding
+    private var route: RouteProviding
     /// Set by `AppEnvironment` after construction; reminders are a side effect of
     /// analysis rather than something the coordinator needs to own.
     weak var reminders: ReminderScheduler?
@@ -56,6 +60,7 @@ final class DriveSessionCoordinator {
 
     private var driveLoop: Task<Void, Never>?
     private var lastWeatherFetch: Date?
+    private var lastRouteFetch: Date?
     private let analysisInterval: TimeInterval = 5
     private let weatherInterval: TimeInterval = 15 * 60
 
@@ -64,13 +69,19 @@ final class DriveSessionCoordinator {
          location: LocationService,
          motion: MotionService,
          settings: AppSettings,
-         weather: WeatherProviding) {
+         weather: WeatherProviding,
+         route: RouteProviding) {
         self.store = store
         self.obd = obd
         self.location = location
         self.motion = motion
         self.settings = settings
         self.weather = weather
+        self.route = route
+    }
+
+    func setRouteProvider(_ provider: RouteProviding) {
+        route = provider
     }
 
     // MARK: - Vehicle selection
@@ -185,6 +196,9 @@ final class DriveSessionCoordinator {
             refreshAnalysis()
         }
         await refreshWeatherIfNeeded(at: point, now: now)
+        // Only when a destination is set; the guard inside returns immediately
+        // otherwise, and it throttles itself to the weather interval.
+        await refreshRouteWeather()
     }
 
     /// Persists impacts the motion service has detected and puts them on the drive.
@@ -448,6 +462,95 @@ final class DriveSessionCoordinator {
     func applyRouteWeather(_ points: [RouteWeatherPoint]) {
         weatherChanges = RouteWeatherAnalyser.changes(current: currentWeather, along: points)
         refreshAnalysis()
+    }
+
+    // MARK: - Destination and route weather
+
+    /// Sets where the driver is going, and forecasts the road there.
+    ///
+    /// Clearing it drops the route forecast rather than leaving yesterday's rain on
+    /// screen: weather "ahead" of a destination that no longer applies is worse than
+    /// no forecast at all.
+    func setDestination(_ destination: RouteDestination?) {
+        self.destination = destination
+        routeUnavailability = nil
+        if destination == nil {
+            weatherChanges = []
+            refreshAnalysis()
+            return
+        }
+        Task { await refreshRouteWeather(force: true) }
+    }
+
+    /// Fetches the forecast at points spaced along the road to the destination.
+    ///
+    /// Runs at the weather interval rather than the drive loop's 1 Hz: a route
+    /// forecast that changed every second would be noise, and each refresh is several
+    /// network calls.
+    func refreshRouteWeather(force: Bool = false) async {
+        guard let destination, let origin = location.latest else { return }
+        guard weather.isConfigured else {
+            routeUnavailability = .weatherServiceUnconfigured
+            return
+        }
+        guard route.isAvailable else {
+            routeUnavailability = .routeUnavailable
+            return
+        }
+        let now = Date()
+        if !force, let last = lastRouteFetch, now.timeIntervalSince(last) < weatherInterval { return }
+        lastRouteFetch = now
+
+        do {
+            let polyline = try await route.polyline(from: origin, to: destination.point)
+            // The driver's own recent average, not a speed limit: how fast they will
+            // actually be at a point decides when they arrive there.
+            let speed = averageSpeedForRouteKmh()
+            let waypoints = RouteWeatherAnalyser.waypoints(along: polyline,
+                                                           from: now,
+                                                           averageSpeedKmh: speed)
+            guard !waypoints.isEmpty else {
+                routeUnavailability = .routeTooShortForForecast
+                return
+            }
+
+            var points: [RouteWeatherPoint] = []
+            for waypoint in waypoints {
+                let hours = max(1, Int(waypoint.expectedAt.timeIntervalSince(now) / 3_600) + 1)
+                let forecast = try await weather.hourlyForecast(at: waypoint.point, hours: hours)
+                // The hour the driver is expected there, not the nearest hour to now.
+                guard let snapshot = forecast.min(by: {
+                    abs($0.timestamp.timeIntervalSince(waypoint.expectedAt))
+                        < abs($1.timestamp.timeIntervalSince(waypoint.expectedAt))
+                }) else { continue }
+                points.append(RouteWeatherPoint(distanceMetres: waypoint.distanceMetres,
+                                                expectedAt: waypoint.expectedAt,
+                                                snapshot: snapshot))
+            }
+            routeUnavailability = points.isEmpty ? .offline : nil
+            applyRouteWeather(points)
+        } catch let error as WeatherError {
+            routeUnavailability = error == .offline ? .offline : .weatherServiceUnconfigured
+        } catch RouteError.noRouteFound {
+            routeUnavailability = .routeUnavailable
+        } catch {
+            routeUnavailability = .offline
+        }
+    }
+
+    /// The speed used to work out when the driver reaches each waypoint.
+    ///
+    /// Prefers what the car is doing now, falls back to this drive's average, and
+    /// finally to a conservative figure. Never a guess dressed as a measurement — it
+    /// only decides which forecast hour to read.
+    private func averageSpeedForRouteKmh() -> Double {
+        if let live = obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 30, now: Date()), live > 15 {
+            return live
+        }
+        if let trip = currentTrip, let average = trip.averageSpeedKmh, average > 15 {
+            return average
+        }
+        return 45
     }
 
     /// Applies an elevation profile for the road ahead.

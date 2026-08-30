@@ -64,6 +64,9 @@ struct DLUnavailableState: View {
         case .noVehicleSelected: return "car"
         case .notEnoughHistory: return "chart.line.uptrend.xyaxis"
         case .featureRequiresValidatedProfile: return "checkmark.seal"
+        case .noDestination: return "mappin.and.ellipse"
+        case .routeUnavailable: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .routeTooShortForForecast: return "arrow.right.to.line"
         }
     }
 }
