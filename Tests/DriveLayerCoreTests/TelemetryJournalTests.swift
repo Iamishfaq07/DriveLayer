@@ -65,6 +65,38 @@ final class TelemetryJournalTests: XCTestCase {
         XCTAssertTrue(journal.interruptedTrips().isEmpty)
     }
 
+    // MARK: - Chunk naming
+
+    /// Names used to come from the file *count*, so a gap in the sequence made the next
+    /// append reuse a name that was already taken -- and because the write is atomic it
+    /// replaced a chunk nobody had read yet.
+    func testAGapInTheSequenceDoesNotOverwriteAnExistingChunk() throws {
+        journal.appendChunk(samples(count: 10, offset: 0), vehicleID: vehicleID, tripID: tripID)
+        journal.appendChunk(samples(count: 10, offset: 10), vehicleID: vehicleID, tripID: tripID)
+        journal.appendChunk(samples(count: 10, offset: 20), vehicleID: vehicleID, tripID: tripID)
+
+        // Remove the middle chunk. That leaves chunk-000001 and chunk-000003, a count of
+        // two, and a count-based name would therefore produce chunk-000003 a second time.
+        let directory = journal.journalURL(vehicleID: vehicleID, tripID: tripID)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("chunk-000002.dlts"))
+
+        journal.appendChunk(samples(count: 10, offset: 30), vehicleID: vehicleID, tripID: tripID)
+
+        let recovered = journal.journalledSamples(vehicleID: vehicleID, tripID: tripID)
+        XCTAssertEqual(recovered.count, 30, "the two survivors plus the chunk just written")
+        XCTAssertTrue(recovered.contains { $0.timestamp == start.addingTimeInterval(20) },
+                      "the chunk a count-based name would have destroyed is still readable")
+        XCTAssertEqual(recovered.last?.timestamp, start.addingTimeInterval(39),
+                       "and the new samples landed somewhere of their own")
+    }
+
+    func testChunkSequenceReadsOnlyChunkFilenames() {
+        XCTAssertEqual(TelemetryJournal.chunkSequence(of: "chunk-000007.dlts"), 7)
+        XCTAssertNil(TelemetryJournal.chunkSequence(of: "drive.dlts"), "the compacted file is not a chunk")
+        XCTAssertNil(TelemetryJournal.chunkSequence(of: "chunk-.dlts"))
+        XCTAssertNil(TelemetryJournal.chunkSequence(of: "chunk-00zz01.dlts"))
+    }
+
     // MARK: - Corruption
 
     func testCorruptChunkIsSkippedRatherThanLosingTheDrive() throws {
