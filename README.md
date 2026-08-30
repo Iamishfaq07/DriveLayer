@@ -34,7 +34,7 @@ three pass**:
 | Job | Runner | What it proves |
 |---|---|---|
 | Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths |
-| Core tests | `macos-14` | `DriveLayerCore` compiles and its **239 tests across 34 suites** pass |
+| Core tests | `macos-14` | `DriveLayerCore` compiles and its **246 tests across 34 suites** pass |
 | App build | `macos-15` | The app and widget extension compile for the iOS Simulator |
 
 What is still **not** verified, and needs hardware:
@@ -74,7 +74,7 @@ The first two came from writing tests; the last two from CI.
 
 ```bash
 # Run the logic tests — no Xcode, no car, no phone required
-swift test          # 239 tests, 34 suites
+swift test          # 246 tests, 34 suites
 
 # Generate the Xcode project and open it
 brew install xcodegen
@@ -148,7 +148,7 @@ Sources/DriveLayerCore/    Foundation-only product logic — no UIKit, SwiftUI,
 App/DriveLayerApp/         The iOS app: design system, services, persistence, screens
 App/DriveLayerWidgets/     WidgetKit extension and the Live Activity
 App/Shared/                Types shared between app and extension
-Tests/DriveLayerCoreTests/ 239 tests, weighted towards failure cases
+Tests/DriveLayerCoreTests/ 246 tests, weighted towards failure cases
 Tools/swiftcheck.py        Static consistency checker
 docs/                      Architecture, product, OBD, CarPlay, profiles, privacy, roadmap
 ```
@@ -165,10 +165,25 @@ docs/                      Architecture, product, OBD, CarPlay, profiles, privac
 
 ## Reference vehicle
 
-Development is calibrated around a **Tata Harrier, 2.0 Kryotec diesel**, but nothing
-is hard-coded to it: it is one entry in a profile catalog, and the generic diesel and
-petrol profiles work with any OBD-II vehicle. See
-[VEHICLE_PROFILES.md](docs/VEHICLE_PROFILES.md) for how to add another.
+DriveLayer is currently a **one-car app**, set up for a **Tata Harrier, 1.5-litre
+TGDi Hyperion turbo petrol** — the only vehicle anything has been checked against.
+Offering a picker of profiles that have never met the cars they claim to describe
+would be exactly the impressive-looking emptiness this project avoids.
+
+Nothing is hard-coded to it, though. The car is one entry in a profile catalog, every
+part of the intelligence layer reads its vehicle through `VehicleProfile`, and the
+generic diesel and petrol profiles are still in the catalog — they are simply not
+offered yet. `SupportedVehicles.offeredProfileIDs` is the single list that decides
+what a driver may choose; widening it brings the pickers back, and nothing else in
+the app decides how many cars exist. See
+[VEHICLE_PROFILES.md](docs/VEHICLE_PROFILES.md).
+
+The reference vehicle changed engine partway through development, from the 2.0
+Kryotec diesel to this one. Nothing outside the profile entry and its tests had to
+change — Diesel Guardian switched itself off through `fuelType`, and the copilot
+already answered particulate-filter questions with "this vehicle isn't a diesel".
+That is the multi-vehicle architecture doing the job it was built for, and it is the
+closest thing to a proof of it so far.
 
 ## Licence
 

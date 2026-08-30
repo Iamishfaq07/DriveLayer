@@ -9,7 +9,7 @@ struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var step: Step = .welcome
     @State private var draftName = ""
-    @State private var draftProfileID = VehicleProfileCatalog.harrier2026AdventureXPlusID
+    @State private var draftProfileID = SupportedVehicles.defaultProfileID
 
     enum Step: Int, CaseIterable {
         case welcome, vehicle, capabilities, permissions, adapter, ready
@@ -61,15 +61,28 @@ struct OnboardingView: View {
 
     private var vehicle: some View {
         VStack(alignment: .leading, spacing: DL.Spacing.medium) {
-            stepTitle("Add your vehicle", subtitle: "Everything DriveLayer learns is kept per vehicle.")
+            stepTitle("Your vehicle", subtitle: "DriveLayer is set up for one car for now — this one.")
             TextField("Name it — \"Harrier\", \"the car\"", text: $draftName)
                 .textFieldStyle(.roundedBorder)
-            Picker("Profile", selection: $draftProfileID) {
-                ForEach(VehicleProfileCatalog.all) { profile in
-                    Text(profile.displayName).tag(profile.id)
+            // With one supported car there is nothing to choose, so the step states
+            // which vehicle DriveLayer is set up for instead of asking.
+            if let only = SupportedVehicles.only {
+                HStack(spacing: DL.Spacing.tight) {
+                    Image(systemName: "car")
+                        .foregroundStyle(DLColor.secondaryText)
+                        .accessibilityHidden(true)
+                    Text(only.displayName)
+                        .font(DL.Font.body.weight(.medium))
+                        .foregroundStyle(DLColor.primaryText)
                 }
+            } else {
+                Picker("Profile", selection: $draftProfileID) {
+                    ForEach(SupportedVehicles.offered) { profile in
+                        Text(profile.displayName).tag(profile.id)
+                    }
+                }
+                .pickerStyle(.menu)
             }
-            .pickerStyle(.menu)
             if let profile = VehicleProfileCatalog.profile(id: draftProfileID) {
                 VStack(alignment: .leading, spacing: DL.Spacing.tight) {
                     Text(profile.validationTier.label)

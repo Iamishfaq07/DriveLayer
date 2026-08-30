@@ -23,31 +23,45 @@ enum VehicleProfileCatalog {
         all.first { $0.id == id }
     }
 
-    /// The reference development vehicle.
+    /// The reference development vehicle: the 1.5-litre TGDi "Hyperion" turbo petrol.
     ///
-    /// Tier is `.experimental`, not `.validated`: the model specifications below come
-    /// from published figures, but no Tata-specific telemetry has been verified on a
-    /// real car, so DriveLayer restricts itself to standard OBD-II data for it.
+    /// Tier is `.experimental`, not `.validated`: no Tata-specific telemetry has been
+    /// verified on a real car, so DriveLayer restricts itself to standard OBD-II data
+    /// for it.
+    ///
+    /// Rated power and torque are `nil` rather than filled in. This engine is recent
+    /// enough that any figure here would be recalled rather than sourced, which is
+    /// what rule 1 above forbids.
+    ///
+    /// Nothing reads these two fields today — they are recorded for a future display
+    /// and have no driver-facing override — so an unsourced number would sit in the
+    /// catalog as an unverifiable claim rather than causing visible harm. That is a
+    /// reason to leave it out, not a reason to guess.
     static let harrier2026AdventureXPlus = VehicleProfile(
         id: harrier2026AdventureXPlusID,
         manufacturer: "Tata",
         model: "Harrier",
         generation: "Facelift",
-        firstModelYear: 2023,
+        firstModelYear: 2025,
         lastModelYear: nil,
         trim: "Adventure X+",
-        fuelType: .diesel,
+        fuelType: .petrol,
         engine: EngineSpec(
-            familyName: "Kryotec",
-            displacementLitres: 2.0,
+            familyName: "Hyperion TGDi",
+            displacementLitres: 1.5,
             cylinderCount: 4,
             aspiration: .turbocharged,
-            ratedPowerPS: 170,
-            ratedTorqueNm: 350
+            ratedPowerPS: nil,
+            ratedTorqueNm: nil
         ),
         transmission: nil,
+        // 50 L is the published figure for the diesel variant. The tank is a body
+        // part and very likely carries over, but "very likely" is not a source, so
+        // it is labelled a generic default rather than a published specification for
+        // this engine. Garage → the vehicle shows the figure with this source beside
+        // it and lets a driver replace it with one from their own manual.
         tankCapacityLitres: 50,
-        tankCapacitySource: .publishedSpecification,
+        tankCapacitySource: .genericDefault,
         nominalBatteryVoltage: 12.0,
         serviceIntervals: [
             ServiceIntervalSpec(
@@ -55,8 +69,8 @@ enum VehicleProfileCatalog {
                 name: "Periodic service",
                 distanceKm: 15_000,
                 months: 12,
-                source: .publishedSpecification,
-                note: "Confirm against your owner's manual and service booklet — intervals vary by market and usage."
+                source: .genericDefault,
+                note: "Carried over from the diesel variant's published interval. Petrol intervals often differ — confirm against your owner's manual and service booklet before relying on this."
             ),
             ServiceIntervalSpec(
                 id: "air-filter",
@@ -64,7 +78,7 @@ enum VehicleProfileCatalog {
                 distanceKm: 30_000,
                 months: 24,
                 source: .genericDefault,
-                note: "Generic diesel guidance, not a Tata-published figure."
+                note: "Generic guidance, not a Tata-published figure."
             ),
             ServiceIntervalSpec(
                 id: "brake-fluid",
@@ -81,13 +95,18 @@ enum VehicleProfileCatalog {
             )
         ],
         expectedStandardPIDs: [],
-        manufacturerCapabilities: dieselExtensionPoints,
-        operatingRanges: dieselOperatingRanges,
+        // No extension points. The diesel set is DPF and exhaust-temperature data
+        // that a petrol engine does not have, and no petrol-specific Tata request
+        // has been verified — a direct-injection engine may well have a particulate
+        // filter, but "may well" does not earn a capability entry.
+        manufacturerCapabilities: [],
+        operatingRanges: petrolOperatingRanges,
         validationTier: .experimental,
         notes: [
             "Standard OBD-II data only. DriveLayer does not use unverified Tata-specific requests.",
-            "Tank capacity and the periodic service interval are published figures — confirm them against your owner's manual.",
-            "Temperature and voltage bands are generic diesel engineering defaults, not Tata-published limits. DriveLayer learns your car's own baselines from your drives."
+            "Tank capacity and the service intervals are carried over from the diesel variant and are labelled generic defaults, not published figures for this engine. Confirm them against your owner's manual — you can enter your own.",
+            "Rated power and torque are not recorded. DriveLayer would rather show nothing than a figure it cannot source.",
+            "Temperature and voltage bands are generic petrol engineering defaults, not Tata-published limits. DriveLayer learns your car's own baselines from your drives."
         ]
     )
 
@@ -173,6 +192,15 @@ enum VehicleProfileCatalog {
         OperatingRangeSpec(metric: .controlModuleVoltageV, condition: .engineOff,
                            normalLow: 12.2, normalHigh: 12.9,
                            watchLow: 12.0, criticalLow: 11.6,
+                           source: .genericDefault),
+        // Neither band is fuel-specific; petrol was simply missing them.
+        OperatingRangeSpec(metric: .engineLoadPercent, condition: .engineRunning,
+                           normalLow: 0, normalHigh: 92,
+                           watchHigh: 97,
+                           source: .genericDefault),
+        OperatingRangeSpec(metric: .intakeAirTemperatureC, condition: .engineRunning,
+                           normalLow: -20, normalHigh: 75,
+                           watchHigh: 90,
                            source: .genericDefault)
     ]
 }

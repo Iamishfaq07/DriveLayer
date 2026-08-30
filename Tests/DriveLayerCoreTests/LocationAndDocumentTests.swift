@@ -313,9 +313,34 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertFalse(harrier.notes.isEmpty)
     }
 
+    /// The reference vehicle now declares no extension points at all, so asserting
+    /// its usable set is empty proves nothing on its own. This keeps the real rule
+    /// under test: a declared but unvalidated capability is never usable.
+    func testDeclaredButUnvalidatedCapabilitiesAreNeverUsable() {
+        let diesel = VehicleProfileCatalog.genericDiesel
+        XCTAssertFalse(diesel.manufacturerCapabilities.isEmpty,
+                       "this test needs a profile that actually declares extension points")
+        XCTAssertTrue(diesel.usableManufacturerCapabilities.isEmpty)
+    }
+
+    /// The reference vehicle is a 1.5-litre TGDi petrol, so nothing about it may be
+    /// described in diesel terms — and the figures carried over from the diesel
+    /// variant must not be labelled as published for this engine.
+    func testReferenceProfileIsThePetrolEngine() {
+        XCTAssertEqual(harrier.fuelType, .petrol)
+        XCTAssertEqual(harrier.engine.displacementLitres, 1.5)
+        XCTAssertNil(harrier.engine.ratedPowerPS,
+                     "an unsourced brochure figure is worse than no figure")
+        XCTAssertNil(harrier.engine.ratedTorqueNm)
+        XCTAssertTrue(harrier.manufacturerCapabilities.isEmpty,
+                      "DPF and exhaust-temperature extension points belong to a diesel")
+    }
+
     func testSpecSourcesAreRecorded() throws {
         XCTAssertEqual(harrier.tankCapacityLitres, 50)
-        XCTAssertEqual(harrier.tankCapacitySource, .publishedSpecification)
+        XCTAssertEqual(harrier.tankCapacitySource, .genericDefault,
+                       "50 L is the diesel variant's published figure, carried over unverified")
+        XCTAssertFalse(harrier.tankCapacitySource.isVehicleSpecific)
         let genericInterval = try XCTUnwrap(harrier.serviceInterval(id: "air-filter"))
         XCTAssertEqual(genericInterval.source, .genericDefault)
         XCTAssertFalse(genericInterval.source.isVehicleSpecific)
@@ -351,6 +376,52 @@ final class VehicleProfileTests: XCTestCase {
         vehicle.tankCapacityOverrideLitres = 45
         XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 45)
         XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), .userProvided)
+    }
+
+    /// Clearing the override returns to the profile's figure. A driver who mistypes
+    /// their tank size must be able to get back out of it — range is estimated from
+    /// this number, so being stuck with a wrong one means a wrong distance on every
+    /// screen that shows range.
+    func testClearingTheOverrideFallsBackToTheProfile() {
+        var vehicle = Vehicle(nickname: "Harrier", profileID: harrier.id,
+                              tankCapacityOverrideLitres: 45)
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 45)
+
+        vehicle.tankCapacityOverrideLitres = nil
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 50)
+        XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), harrier.tankCapacitySource)
+
+        // A typed zero is not a tank size either.
+        vehicle.tankCapacityOverrideLitres = 0
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 50)
+        XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), harrier.tankCapacitySource)
+    }
+
+    // MARK: - Product scope
+
+    /// DriveLayer offers one car at the moment. These pin the scope so that widening
+    /// it is a deliberate edit rather than something that happens by accident.
+    func testOnlyTheReferenceVehicleIsOffered() {
+        XCTAssertEqual(SupportedVehicles.offeredProfileIDs, [harrier.id])
+        XCTAssertTrue(SupportedVehicles.isSingleVehicle)
+        XCTAssertEqual(SupportedVehicles.only?.id, harrier.id)
+    }
+
+    /// A typo in an offered ID would leave the app with an empty picker and no way to
+    /// add a car, which is the kind of failure that only shows up on a device.
+    func testEveryOfferedProfileExistsInTheCatalog() {
+        XCTAssertEqual(SupportedVehicles.offered.count, SupportedVehicles.offeredProfileIDs.count,
+                       "an offered profile ID does not resolve in the catalog")
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: SupportedVehicles.defaultProfileID))
+    }
+
+    /// Narrowing what is offered must not narrow the catalog: the generic profiles
+    /// are what a second car gets built on, and the diesel one is the fixture the
+    /// Diesel Guardian tests depend on.
+    func testCatalogStillCarriesTheProfilesThatAreNotOffered() {
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: VehicleProfileCatalog.genericDieselID))
+        XCTAssertNotNil(VehicleProfileCatalog.profile(id: VehicleProfileCatalog.genericPetrolID))
+        XCTAssertGreaterThan(VehicleProfileCatalog.all.count, SupportedVehicles.offered.count)
     }
 
     func testVehicleDescriptionNeverLeaksIdentifiers() {

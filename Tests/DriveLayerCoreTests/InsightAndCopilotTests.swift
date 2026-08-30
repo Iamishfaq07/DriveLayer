@@ -247,7 +247,11 @@ final class VehicleHealthTests: XCTestCase {
         let context = InsightContext(now: referenceDate,
                                      profile: harrier,
                                      isAdapterConnected: true,
-                                     telemetry: telemetry([.coolantTemperatureC: 117,
+                                     // Above the petrol profile's critical coolant
+                                     // band. The point of the test is the roll-up,
+                                     // not the threshold, so it uses a value no
+                                     // sane band would call anything but critical.
+                                     telemetry: telemetry([.coolantTemperatureC: 121,
                                                            .controlModuleVoltageV: 14.1,
                                                            .engineRPM: 1_600]))
         XCTAssertEqual(VehicleHealthEvaluator.evaluate(context).overall, .critical)
