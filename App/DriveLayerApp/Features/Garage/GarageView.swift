@@ -188,7 +188,12 @@ struct EditVehicleView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var odometer = ""
+    @State private var tankOverride = ""
     @State private var isConfirmingDelete = false
+
+    private var profile: VehicleProfile? {
+        VehicleProfileCatalog.profile(id: vehicle.profileID)
+    }
 
     var body: some View {
         Form {
@@ -197,6 +202,7 @@ struct EditVehicleView: View {
                 TextField("Odometer (km)", text: $odometer)
                     .keyboardType(.numberPad)
             }
+            tankSection
             Section {
                 Button(role: .destructive) {
                     isConfirmingDelete = true
@@ -214,13 +220,20 @@ struct EditVehicleView: View {
                 Button("Save") {
                     vehicle.odometerKm = Double(odometer) ?? vehicle.odometerKm
                     vehicle.odometerUpdatedAt = Date()
+                    // An emptied field clears the override, so a driver who mistyped
+                    // can get back to the profile's own figure rather than being
+                    // stuck with a number they cannot remove.
+                    vehicle.tankCapacityOverrideLitres = Double(tankOverride.replacingOccurrences(of: ",", with: "."))
                     environment.store.update(vehicle: vehicle)
                     environment.reloadVehicles()
                     dismiss()
                 }
             }
         }
-        .onAppear { odometer = vehicle.odometerKm.map { String(Int($0)) } ?? "" }
+        .onAppear {
+            odometer = vehicle.odometerKm.map { String(Int($0)) } ?? ""
+            tankOverride = vehicle.tankCapacityOverrideLitres.map { String(format: "%g", $0) } ?? ""
+        }
         .confirmationDialog("Delete this vehicle?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Delete everything", role: .destructive) {
                 environment.deleteSelectedVehicle()
@@ -228,5 +241,36 @@ struct EditVehicleView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    /// Tank capacity, its source, and a way to correct it.
+    ///
+    /// This is the number range estimation multiplies the fuel level by, so it is the
+    /// one specification where a wrong value turns into a confident wrong distance.
+    /// It was previously settable only when adding a vehicle, which left a driver who
+    /// checked their manual afterwards with no way to fix it.
+    private var tankSection: some View {
+        Section {
+            ValueOrReasonRow(label: "Capacity",
+                             value: vehicle.tankCapacityLitres(profile: profile).map { String(format: "%g", $0) },
+                             unit: "L",
+                             reason: "Not recorded")
+            ValueOrReasonRow(label: "Source",
+                             value: vehicle.tankCapacitySource(profile: profile).label)
+            TextField("Override (litres)", text: $tankOverride)
+                .keyboardType(.decimalPad)
+        } header: {
+            Text("Fuel tank")
+        } footer: {
+            Text(tankFooter)
+        }
+    }
+
+    private var tankFooter: String {
+        let source = vehicle.tankCapacitySource(profile: profile)
+        let base = "Range is estimated from this and your fuel level, so a wrong figure becomes a wrong distance. Leave the override empty to use the profile's own value."
+        return source.isVehicleSpecific
+            ? base
+            : "This is a generic default, not a published figure for your exact vehicle. " + base
     }
 }

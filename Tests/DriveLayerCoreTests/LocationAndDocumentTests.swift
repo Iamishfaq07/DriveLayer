@@ -378,6 +378,25 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), .userProvided)
     }
 
+    /// Clearing the override returns to the profile's figure. A driver who mistypes
+    /// their tank size must be able to get back out of it — range is estimated from
+    /// this number, so being stuck with a wrong one means a wrong distance on every
+    /// screen that shows range.
+    func testClearingTheOverrideFallsBackToTheProfile() {
+        var vehicle = Vehicle(nickname: "Harrier", profileID: harrier.id,
+                              tankCapacityOverrideLitres: 45)
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 45)
+
+        vehicle.tankCapacityOverrideLitres = nil
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 50)
+        XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), harrier.tankCapacitySource)
+
+        // A typed zero is not a tank size either.
+        vehicle.tankCapacityOverrideLitres = 0
+        XCTAssertEqual(vehicle.tankCapacityLitres(profile: harrier), 50)
+        XCTAssertEqual(vehicle.tankCapacitySource(profile: harrier), harrier.tankCapacitySource)
+    }
+
     func testVehicleDescriptionNeverLeaksIdentifiers() {
         let vehicle = Vehicle(nickname: "Harrier", profileID: harrier.id,
                               registrationNumber: "KA01AB1234", vin: "MAT123456789")

@@ -30,10 +30,13 @@ enum VehicleProfileCatalog {
     /// for it.
     ///
     /// Rated power and torque are `nil` rather than filled in. This engine is recent
-    /// enough that repeating a half-remembered brochure figure would be exactly the
-    /// invention rule 1 above forbids — and a wrong number here would quietly feed
-    /// the load and economy wording. A driver can enter the real figures; DriveLayer
-    /// will not guess them.
+    /// enough that any figure here would be recalled rather than sourced, which is
+    /// what rule 1 above forbids.
+    ///
+    /// Nothing reads these two fields today — they are recorded for a future display
+    /// and have no driver-facing override — so an unsourced number would sit in the
+    /// catalog as an unverifiable claim rather than causing visible harm. That is a
+    /// reason to leave it out, not a reason to guess.
     static let harrier2026AdventureXPlus = VehicleProfile(
         id: harrier2026AdventureXPlusID,
         manufacturer: "Tata",
@@ -55,8 +58,8 @@ enum VehicleProfileCatalog {
         // 50 L is the published figure for the diesel variant. The tank is a body
         // part and very likely carries over, but "very likely" is not a source, so
         // it is labelled a generic default rather than a published specification for
-        // this engine. A driver who checks their manual can override it, and the UI
-        // shows where the number came from either way.
+        // this engine. Garage → the vehicle shows the figure with this source beside
+        // it and lets a driver replace it with one from their own manual.
         tankCapacityLitres: 50,
         tankCapacitySource: .genericDefault,
         nominalBatteryVoltage: 12.0,
