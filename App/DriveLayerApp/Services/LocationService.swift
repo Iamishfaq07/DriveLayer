@@ -94,7 +94,10 @@ final class LocationService: NSObject, LocationProviding {
         }
     }
 
-    private static func convert(_ location: CLLocation) -> GeoPoint {
+    /// Nonisolated because it is pure and is called from the delegate's nonisolated
+    /// callbacks; leaving it main-actor-isolated silently drops the isolation when
+    /// passed as a function value, which is an error under Swift 6.
+    private nonisolated static func convert(_ location: CLLocation) -> GeoPoint {
         GeoPoint(latitude: location.coordinate.latitude,
                  longitude: location.coordinate.longitude,
                  altitudeMetres: location.verticalAccuracy > 0 ? location.altitude : nil,

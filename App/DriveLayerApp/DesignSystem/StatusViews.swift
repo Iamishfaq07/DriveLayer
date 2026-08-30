@@ -15,15 +15,16 @@ struct StatusIndicator: View {
             Image(systemName: status.symbolName)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(DLColor.status(status))
-                .accessibilityHidden(showsLabel)
             if showsLabel {
                 Text(status.label)
                     .font(DL.Font.callout)
                     .foregroundStyle(DLColor.primaryText)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(showsLabel ? status.label : Text(status.label))
+        // One combined element carrying the status name, whether or not the label is
+        // drawn — the symbol on its own is meaningless to VoiceOver.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(status.label))
     }
 }
 
