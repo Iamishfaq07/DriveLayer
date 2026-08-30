@@ -200,15 +200,13 @@ final class AppEnvironment {
     ///   the grace period is that this can never delete one.
     func reconcileTelemetryJournals(now: Date = Date(), grace: TimeInterval = 48 * 3_600) {
         for journal in TelemetryFileStore.shared.interruptedTrips() {
-            // A row that exists but will not decode is not an orphan. Its drive is
-            // recoverable by a later build, and its telemetry has to outlive this one.
-            guard !store.tripRowExists(id: journal.tripID) else { continue }
-
-            if let lastWrite = TelemetryFileStore.shared.journalLastWrite(vehicleID: journal.vehicleID,
-                                                                         tripID: journal.tripID),
-               now.timeIntervalSince(lastWrite) < grace {
-                continue
-            }
+            let outcome = JournalReconciliation.outcome(
+                hasTripRow: store.tripRowExists(id: journal.tripID),
+                lastWrite: TelemetryFileStore.shared.journalLastWrite(vehicleID: journal.vehicleID,
+                                                                     tripID: journal.tripID),
+                now: now,
+                grace: grace)
+            guard outcome == .discard else { continue }
 
             TelemetryFileStore.shared.discardJournal(vehicleID: journal.vehicleID,
                                                      tripID: journal.tripID)

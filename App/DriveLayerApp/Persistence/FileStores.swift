@@ -41,7 +41,11 @@ private enum ProtectedDirectory {
 /// ever succeed cannot demonstrate that they do.
 protocol TelemetryWriting: Sendable {
     /// True only once the samples are on disk. See the note on the implementation.
+    @discardableResult
     func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) -> Bool
+    /// Discardable at the recovery call site, where a failure simply leaves the journal in
+    /// place to be compacted at the next launch.
+    @discardableResult
     func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample]) -> Bool
     func discardJournal(vehicleID: UUID, tripID: UUID)
 }
