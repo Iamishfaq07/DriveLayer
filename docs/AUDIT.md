@@ -340,5 +340,42 @@ Recorded so they can be checked against the real car later.
 
 ## Implementation status
 
-Tracked in `ROADMAP.md`. This document records what was found and why; the roadmap
-records what is being done about it.
+Every P0 and three P1s are fixed and verified by CI: compiled for the iOS Simulator,
+with 326 tests across 41 suites passing. The reasoning for each fix is in its commit
+message; `ROADMAP.md` tracks what remains.
+
+| Finding | Status | Verified by |
+|---|---|---|
+| P0-1 active trips not persisted | Fixed | Core tests + app build |
+| P0-2 telemetry held in memory until trip end | Fixed | 29 `TelemetryJournal` tests |
+| P0-3 unknown DTC capability read as unsupported | Fixed | 11 tests, incl. the brief's exact scenario |
+| P0-4 vehicle deletion leaves scanned files | Fixed | App build only — call site is app-target |
+| P0-5 delete-all leaves widgets, reminders, live state | Fixed | App build only — call site is app-target |
+| P0-6 retention prunes baselines, not telemetry | Fixed | `deleteCompacted` retention tests |
+| P0-7 automatic detection requests no permission | Fixed | 7 `AutomaticDetectionStatus` tests |
+| P1-1 barometric altitude re-anchored every second | Fixed | 14 `AltitudeFusion` tests |
+| P1-2 road-impact setting gated only persistence | Fixed | App build only — sensor gate is app-target |
+| P1-3 no automatic OBD reconnection | Fixed | 9 `ReconnectPolicy` tests |
+| Mode 09 unreachable | Fixed | Covered in the capability tests |
+| `deleteEverything` removed its own directory | Fixed | `TelemetryJournal` tests |
+| Relative altitude displayed as absolute | Fixed | Covered by the fusion tests |
+
+Four of these are covered only by "it compiles", because their call sites are in the
+app target. In each case the logic underneath was moved into the core and tested
+there — `TelemetryJournal`, `AltitudeFusion`, `ReconnectPolicy`,
+`AutomaticDetectionStatus` — which is real coverage of the behaviour but not of the
+wiring. An app test target remains the outstanding structural item, and it is the
+first thing in "Next up".
+
+### Still open from this audit
+
+- **DTC event-driven refresh.** Codes are only read on connect and on demand. Monitor
+  status (PID 0x01) is decoded as display text rather than a structured MIL state and
+  DTC count, so there is nothing to trigger a refresh from.
+- **BLE discovery validation.** Any peripheral with a notify and a write characteristic
+  is still offered as a possible adapter.
+- **BLE state restoration.** Not implemented; needs a device to verify against.
+- **Full location lifecycle audit.** The worst case is fixed. The complete set of
+  states in the brief — armed, foreground, recording, route analysis — has not been
+  walked through against real iOS behaviour.
+- **Phase 3 onwards.** The Hyperion pivot proper, product UX, CarPlay and polish.

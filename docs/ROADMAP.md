@@ -3,9 +3,16 @@
 Maintained as work proceeds.
 
 **CI is green.** All three jobs pass: static checks, `swift build` + `swift test`
-(229 tests across 33 suites) on macOS, and an Xcode build of the app and widget
+(326 tests across 41 suites) on macOS, and an Xcode build of the app and widget
 extension for the iOS Simulator. What remains unverified needs hardware — see
 "Known gaps" at the end of this file.
+
+The project is now scoped to **one vehicle**: a 2026 Tata Harrier with the 1.5-litre
+Hyperion turbo GDI petrol engine. The architecture stays multi-vehicle — every part of
+the intelligence layer reads its car through `VehicleProfile` — but the product does
+not, and no development time goes into generic multi-brand UX. See
+[AUDIT.md](AUDIT.md) for what was found when the repository was measured against that
+brief, and "Harrier brief" below for what is being done about it.
 
 ---
 
@@ -90,7 +97,14 @@ systems read `unknown` with an actionable reason.
   stable id, carries forward valid findings, expires stale ones, and cuts to three
   while driving. Confidence capped by the weakest provenance.
 
-## Phase 8 — Diesel Guardian · **Done**
+## Phase 8 — Diesel Guardian · **Done, and now superseded**
+
+> Built for the 2.0 Kryotec diesel that used to be the reference car. It switches
+> itself off through `fuelType`, so it is invisible on the petrol Harrier, and the
+> copilot already answers particulate-filter questions with "this vehicle isn't a
+> diesel". The subsystem architecture is sound and worth generalising rather than
+> deleting; the *product concept* is being replaced by Hyperion Guardian. Tracked
+> under the Harrier brief below, not yet done.
 
 Short-trip fraction and warm-up completion as measurements where coolant is
 available and inference where it is not; `DPFTelemetry` with no path that fills a
@@ -171,19 +185,83 @@ Honest list of what is scaffolding rather than working software.
 | **Other vehicles** | Deliberately not offered. The catalog, the profile system and per-vehicle isolation are all built and tested; `SupportedVehicles.offeredProfileIDs` lists the one car a driver may pick, because it is the only one anything has been checked against. |
 | **Watch app** | Not started. |
 
-## Next up (V1 completion)
+## Harrier brief
 
-1. ~~Build it.~~ **Done** — CI compiles everything and runs the suite.
-2. ~~Local notifications for document expiry and overdue service.~~ **Done.**
-3. ~~Populate Live Activity range and capture trip weather.~~ **Done.**
-4. ~~Wire the VisionKit capture flow to the existing, tested extractor.~~ **Done.**
-5. ~~Widget deep links.~~ **Done.**
-6. ~~Accessibility pass: Dynamic Type at the largest sizes, VoiceOver labels on every
-   metric, contrast check on the status palette.~~ **Done** — the contrast check is
-   now a test rather than a one-off, and it found three failing colours. Not yet
-   verified with VoiceOver on a device.
-7. Run it on a device against a real adapter — the first thing that will find
-   problems no amount of CI can.
+The seven phases requested for the Harrier-only pivot, in the order they were given.
+Nothing below is marked done unless CI has compiled and tested it.
+
+### Phase 1 — Critical reliability · **Done**
+
+Every item was confirmed against the code first; see [AUDIT.md](AUDIT.md) for the call
+sites that proved each one.
+
+| Item | Status | Note |
+|---|---|---|
+| Active-trip persistence | **Done** | Checkpointed on start, every 20 s, and on backgrounding |
+| Telemetry journaling | **Done** | `TelemetryJournal`, append-only chunks, compaction last |
+| Crash recovery | **Done** | `recoverInterruptedTrips()` was dead code; it now has drives to find |
+| DTC unknown-capability bug | **Done** | Two independent permanent blocks, both removed |
+| BLE reconnect | **Done** | Supervised 1/2/5/10/30 s ladder, drive untouched |
+| Privacy deletion | **Done** | `PrivacyDeletion` orchestrates storage, widgets, reminders, Live Activity |
+| Retention correctness | **Done** | Now prunes raw telemetry; baselines kept and reset separately |
+| Widget cleanup | **Done** | `WidgetSnapshotStore.clear()` existed nowhere before |
+| Notification cleanup | **Done** | Cancelled on vehicle and all-data deletion |
+| Auto-recording permissions | **Done** | Requests, verifies, and reports what iOS actually said |
+| DTC event-driven refresh | **Not done** | Needs monitor-status PID 0x01 decoded structurally, not as display text |
+
+### Phase 2 — Integration quality · **Partly done**
+
+| Item | Status | Note |
+|---|---|---|
+| Altitude fusion | **Done** | Was re-anchoring to GPS every second; barometer contributed nothing |
+| Road-impact setting | **Done** | Gated persistence only; 20 Hz processing ran regardless |
+| Location lifecycle | **Partly** | `start()` no longer asks for driving accuracy when detection is off; full lifecycle audit outstanding |
+| Adapter reconnect | **Done** | Includes wiring `noteAdapterConnectionChange`, which had no callers |
+| BLE discovery validation | **Not done** | Every notify+write peripheral is still treated as a candidate |
+| BLE state restoration | **Not done** | Needs `CBCentralManager` restoration and a device to verify against |
+| App-level integration tests | **Not done** | See below — this is the structural blocker |
+
+**The structural blocker.** `Package.swift` declares only the core library and its test
+target; the app target exists solely in `project.yml`. So all 326 tests exercise
+`DriveLayerCore` and the app target has **none** — and almost every bug in this phase
+lived there. The approach taken so far has been to move the awkward logic *into* the
+core where `swift test` reaches it: `TelemetryJournal`, `AltitudeFusion`,
+`ReconnectPolicy`, `AutomaticDetectionStatus`. That is genuine coverage of the
+behaviour, but it is not coverage of the call sites. A real app test target, run via
+`xcodebuild test` on the macOS runner, is still needed.
+
+### Phase 3 — Hyperion pivot · **Not started**
+
+The profile is already correct in substance: Tata Harrier, petrol, Hyperion TGDi 1.5,
+turbocharged, `.experimental` tier, no invented power or torque figures, and an empty
+manufacturer-specific PID table. The model year was 2025 in the profile and 2026 in its
+own id; reconciled to 2026.
+
+What remains: renaming and generalising `Diesel/` into an aftertreatment abstraction
+plus a petrol-focused Hyperion Guardian, the warm-up model, heat-soak intelligence,
+turbo/air intelligence from MAP − BARO clearly labelled as an estimate, fuel-trim
+baselines, GDI fuel-rail data where standardised, and battery/start intelligence.
+
+### Phase 4 — Route intelligence · **Mostly done, earlier**
+
+Destination search, `MKDirections` routing, route weather and the elevation hooks
+landed in PR #3. Missing: a unified Context Ahead engine and fuel-to-destination.
+
+### Phases 5–7 — Product UX, CarPlay, polish · **Not started**
+
+Today/Hyperion/Drive/Trips restructure, the Hyperion screen, CarPlay simplification and
+Ask Harrier, then the accessibility, battery and long-drive soak work.
+
+## Next up
+
+1. An app test target, so the call sites fixed in phases 1 and 2 are covered rather
+   than only the logic beneath them.
+2. Decode monitor-status PID 0x01 structurally (MIL state, DTC count) to finish the
+   event-driven diagnostics refresh.
+3. Begin the Hyperion Guardian rename, as one coherent change rather than a
+   half-migration.
+4. Run it on a device against a real adapter — still the thing that will find what no
+   amount of CI can.
 
 ## V2
 
