@@ -316,7 +316,7 @@ Keychain SecItemAdd SecItemCopyMatching FileProtectionType
 Speech AVFoundation AVAudioSession AVSpeechSynthesizer AVSpeechUtterance
 MapKit MKMapView MKCoordinateRegion MKPolyline Map MapPolyline MapCameraPosition
 Charts Combine AnyCancellable PassthroughSubject CurrentValueSubject
-Instruments SF Symbols Swift Darwin Dispatch
+Instruments SF Symbols Swift Darwin Dispatch DriveLayerCore DriveLayerApp
 NSRegularExpression NSRange NSTextCheckingResult NSDataDetector NSAttributedString
 NSPredicate NSSortDescriptor NSCache NSError NSKeyedArchiver NSKeyedUnarchiver
 CaseIterable ExpressibleByStringLiteral ExpressibleByArrayLiteral ExpressibleByIntegerLiteral
@@ -430,6 +430,9 @@ def main() -> int:
         for match in ident_re.finditer(code):
             name = match.group(1)
             if name in known or len(name) <= 1:
+                continue
+            # XCTest's assertion functions are free functions, not types.
+            if name.startswith("XCT"):
                 continue
             if name.isupper():  # constant-style identifiers such as RPM in doc text
                 continue

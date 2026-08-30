@@ -72,6 +72,8 @@ struct VehicleContextSnapshot: Sendable, Equatable {
         var hasDirectFilterData: Bool
     }
 
+    // Defaults let a caller build a partial snapshot: a phone-only vehicle genuinely
+    // has no fuel or health section, and the copilot must handle that.
     var generatedAt: Date
     var vehicle: VehicleSummary?
     var health: HealthSummary?
@@ -84,11 +86,11 @@ struct VehicleContextSnapshot: Sendable, Equatable {
     var maintenance: MaintenanceSummary?
     var weather: WeatherSummary?
     var diesel: DieselSummary?
-    var recentInsights: [String]
-    var activeTroubleCodes: [String]
+    var recentInsights: [String] = []
+    var activeTroubleCodes: [String] = []
     var batteryBaselineV: Double?
     var batteryTrendVPerWindow: Double?
-    var isDriving: Bool
+    var isDriving: Bool = false
 }
 
 /// Builds the snapshot from the same context the insight engine uses.

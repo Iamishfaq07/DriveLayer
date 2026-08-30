@@ -97,27 +97,30 @@ struct GradientCalculator: Sendable {
                              accuracyMetres: max(0.5, accuracy),
                              timestamp: point.timestamp))
 
-        // Keep a little more than the window so the oldest entry brackets it.
-        let cutoff = cumulativeDistance - windowMetres * 1.5
+        let cutoff = cumulativeDistance - windowMetres
         entries.removeAll { $0.cumulativeDistanceMetres < cutoff }
     }
 
     /// The current gradient, or `nil` when there is not enough travel to say.
+    ///
+    /// The slope is fitted across every sample in the window rather than taken from
+    /// its two endpoints, so a single bad altitude reading moves the answer a little
+    /// instead of defining it.
     var current: GradientEstimate? {
-        guard entries.count >= 3, let newest = entries.last else { return nil }
-        let target = newest.cumulativeDistanceMetres - windowMetres
-        guard let oldest = entries.first(where: { $0.cumulativeDistanceMetres >= target }) ?? entries.first else {
-            return nil
-        }
+        guard entries.count >= 3,
+              let newest = entries.last,
+              let oldest = entries.first else { return nil }
+
         let run = newest.cumulativeDistanceMetres - oldest.cumulativeDistanceMetres
         guard run >= minimumWindowMetres else { return nil }
 
-        // Median-filter each end so one bad altitude sample cannot define the gradient.
-        let startAltitude = Statistics.median(entries.prefix(3).map(\.altitudeMetres)) ?? oldest.altitudeMetres
-        let endAltitude = Statistics.median(entries.suffix(3).map(\.altitudeMetres)) ?? newest.altitudeMetres
-        let rise = endAltitude - startAltitude
-        guard let percent = Convert.gradientPercent(rise: rise, run: run) else { return nil }
+        guard let metresPerMetre = Statistics.slope(y: entries.map(\.altitudeMetres),
+                                                    x: entries.map(\.cumulativeDistanceMetres)) else { return nil }
+        let percent = metresPerMetre * 100
+        let rise = metresPerMetre * run
 
+        // Confidence collapses as the altitude change approaches sensor accuracy:
+        // a "climb" smaller than the noise floor is not a climb.
         let accuracy = Statistics.mean(entries.map(\.accuracyMetres)) ?? 10
         let signalToNoise = abs(rise) / max(1, accuracy * 1.5)
         let distanceFactor = Statistics.clamp(run / windowMetres, 0...1)

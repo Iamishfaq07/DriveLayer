@@ -226,9 +226,11 @@ struct DocumentFieldExtractor: DocumentTextExtracting, Sendable {
             line.split(whereSeparator: { $0 == " " || $0 == ":" || $0 == "\t" }).map(String.init)
         }
         return candidates.first { token in
-            let stripped = token.filter { $0.isLetter || $0.isNumber }
-            guard stripped.count >= 8, stripped.count <= 24 else { return false }
-            return stripped.contains(where: \.isNumber) && stripped.allSatisfy { $0.isLetter || $0.isNumber }
+            // Checked on the raw token, so a date like 01/04/2027 is not mistaken for
+            // a policy number once its separators are stripped.
+            guard token.allSatisfy({ $0.isLetter || $0.isNumber }) else { return false }
+            guard token.count >= 8, token.count <= 24 else { return false }
+            return token.contains(where: \.isNumber) && token.contains(where: \.isLetter)
         }
     }
 }

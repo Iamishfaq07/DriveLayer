@@ -46,21 +46,28 @@ enum Statistics {
         return median(values.map { abs($0 - med) })
     }
 
-    /// Ordinary least squares slope of `values` against `times` (seconds), returned
-    /// per day so trends read as "-0.31 V over 30 days" rather than per-second noise.
-    static func slopePerDay(values: [Double], times: [Date]) -> Double? {
-        guard values.count == times.count, values.count > 1 else { return nil }
-        let x = times.map { $0.timeIntervalSinceReferenceDate }
-        guard let meanX = mean(x), let meanY = mean(values) else { return nil }
+    /// Ordinary least squares slope of `y` against `x`. `nil` when `x` has no spread,
+    /// which is the honest answer to "what is the trend of a single point?".
+    static func slope(y: [Double], x: [Double]) -> Double? {
+        guard y.count == x.count, y.count > 1 else { return nil }
+        guard let meanX = mean(x), let meanY = mean(y) else { return nil }
         var numerator = 0.0
         var denominator = 0.0
         for index in 0..<x.count {
             let dx = x[index] - meanX
-            numerator += dx * (values[index] - meanY)
+            numerator += dx * (y[index] - meanY)
             denominator += dx * dx
         }
         guard denominator > 0 else { return nil }
-        return (numerator / denominator) * 86_400
+        return numerator / denominator
+    }
+
+    /// Slope against time, returned per day so trends read as "-0.31 V over 30 days"
+    /// rather than as per-second noise.
+    static func slopePerDay(values: [Double], times: [Date]) -> Double? {
+        let seconds = times.map { $0.timeIntervalSinceReferenceDate }
+        guard let perSecond = slope(y: values, x: seconds) else { return nil }
+        return perSecond * 86_400
     }
 
     /// Exponentially weighted moving average. `alpha` in 0...1; higher reacts faster.
