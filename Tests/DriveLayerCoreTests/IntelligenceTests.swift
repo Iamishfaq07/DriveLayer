@@ -232,10 +232,33 @@ final class MaintenanceTests: XCTestCase {
         XCTAssertNil(status.remainingKm)
     }
 
+    /// Built from a profile written here rather than one out of the catalog. The
+    /// rule under test is that each item inherits its own interval's source — a
+    /// contrast that vanishes the moment every interval in the catalog happens to
+    /// share one source, as it does now that the reference vehicle's figures are
+    /// carried-over defaults.
     func testDefaultItemsCarryTheProfilesSpecSource() throws {
-        let vehicle = Vehicle(nickname: "Harrier", profileID: VehicleProfileCatalog.harrier2026AdventureXPlusID)
-        let items = MaintenanceEngine.defaultItems(for: vehicle,
-                                                   profile: VehicleProfileCatalog.harrier2026AdventureXPlus)
+        let profile = VehicleProfile(
+            id: "test.mixed-sources",
+            manufacturer: "Test",
+            model: "Vehicle",
+            fuelType: .petrol,
+            engine: EngineSpec(),
+            tankCapacityLitres: nil,
+            tankCapacitySource: .genericDefault,
+            serviceIntervals: [
+                ServiceIntervalSpec(id: "periodic-service", name: "Periodic service",
+                                    distanceKm: 15_000, months: 12,
+                                    source: .publishedSpecification),
+                ServiceIntervalSpec(id: "air-filter", name: "Air filter",
+                                    distanceKm: 30_000,
+                                    source: .genericDefault)
+            ],
+            validationTier: .experimental
+        )
+        let vehicle = Vehicle(nickname: "Test car", profileID: profile.id)
+        let items = MaintenanceEngine.defaultItems(for: vehicle, profile: profile)
+
         let service = try XCTUnwrap(items.first { $0.kind == .periodicService })
         XCTAssertEqual(service.intervalDistanceKm, 15_000)
         XCTAssertEqual(service.source, .publishedSpecification)
