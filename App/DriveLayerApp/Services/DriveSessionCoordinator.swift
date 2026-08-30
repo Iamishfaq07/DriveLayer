@@ -438,6 +438,14 @@ final class DriveSessionCoordinator {
             pendingSamples.append(sample)
         }
 
+        // Simulated telemetry stops here. It may be journalled, shown live and used to
+        // exercise the insight rules -- that is what the simulator is for -- but it must
+        // never teach DriveLayer what is normal for a real Harrier. Nothing downstream
+        // could tell the difference afterwards: aggregates are merged into the same store
+        // by the same call, and a baseline learned from a scenario would quietly skew
+        // every comparison made against the actual car.
+        guard !telemetry.containsSimulatedData else { return }
+
         // Baseline observations are filed under the conditions they were taken in.
         let context = BaselineEngine.context(speedKmh: telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
                                              engineLoadPercent: telemetry.value(.engineLoadPercent, freshWithin: 20, now: now),

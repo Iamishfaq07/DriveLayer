@@ -44,11 +44,19 @@ struct VehicleTelemetry: Sendable, Equatable {
         if timestamp > updatedAt { updatedAt = timestamp }
     }
 
-    mutating func apply(_ reading: OBDReading) {
+    /// - Parameter provenance: where the reading came from. Defaults to `.measured`; the
+    ///   connection manager passes `.simulated` when the transport is the simulator, so
+    ///   synthetic data cannot travel through the app wearing a sensor reading's clothes.
+    mutating func apply(_ reading: OBDReading, provenance: DataProvenance = .measured) {
         guard let metric = reading.metric,
               let value = reading.numericValue,
               reading.isPlausible else { return }
-        set(metric, value: value, at: reading.timestamp)
+        set(metric, value: value, at: reading.timestamp, provenance: provenance)
+    }
+
+    /// True when any reading here came from the simulator.
+    var containsSimulatedData: Bool {
+        entries.values.contains { !$0.provenance.describesRealVehicle }
     }
 
     func entry(_ metric: VehicleMetric) -> Entry? { entries[metric] }

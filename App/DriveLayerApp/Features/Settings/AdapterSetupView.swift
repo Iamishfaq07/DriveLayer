@@ -12,7 +12,9 @@ struct AdapterSetupView: View {
             if !environment.settings.useSimulator {
                 discoverySection
             }
-            simulatorSection
+            if AppSettings.isSimulatorAvailable {
+                simulatorSection
+            }
             Section {
                 Text("DriveLayer only ever reads from your vehicle. It sends the standard read-only requests and nothing else — no clearing codes, no configuration, no control.")
                     .font(DL.Font.caption)

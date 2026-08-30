@@ -211,7 +211,9 @@ final class OBDConnectionManager {
             do {
                 let reading = try await session.read(descriptor.pid)
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
-                telemetry.apply(reading)
+                // Source.isSimulated existed and was used only for display. This is the
+                // place it actually matters.
+                telemetry.apply(reading, provenance: source?.isSimulated == true ? .simulated : .measured)
                 if !reading.isPlausible {
                     note("\(reading.name) returned an implausible value and was ignored.")
                 }

@@ -130,7 +130,9 @@ enum DLColor {
         // A value you typed is as certain as one the car measured -- the uncertainty in
         // `DataProvenance.confidence` is 1.0 for both -- so it reads at full weight.
         case .measured, .userEntered: return primaryText
-        case .estimated, .inferred: return secondaryText
+        // Simulated reads at derived weight: it is not a guess, but it is not this
+        // car either, and it must never look like a sensor reading.
+        case .estimated, .inferred, .simulated: return secondaryText
         case .unavailable: return unknown
         }
     }

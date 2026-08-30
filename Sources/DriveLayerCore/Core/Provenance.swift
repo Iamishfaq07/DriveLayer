@@ -18,8 +18,22 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
     /// and the driver is usually a better source for their own tank size than a
     /// specification carried over from a different variant.
     case userEntered
+    /// Produced by the built-in simulator, not by a vehicle.
+    ///
+    /// A first-class provenance rather than a flag on the side, because the alternative
+    /// was what the code did before: simulated readings were stamped `measured` and were
+    /// then indistinguishable from a real Harrier at every point downstream -- baselines,
+    /// health trends, history. Within a scenario the number is exactly what it claims, so
+    /// it is not a guess; it is simply not this car.
+    case simulated
     /// We have no basis for a value. Render as "—", never as 0.
     case unavailable
+
+    /// Whether a value of this provenance describes the real vehicle.
+    ///
+    /// The guard the learning path needs: whatever else is true of a simulated reading,
+    /// it must never teach DriveLayer what is normal for a driver's actual car.
+    var describesRealVehicle: Bool { self != .simulated }
 
     var label: String {
         switch self {
@@ -27,6 +41,7 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         case .estimated: return "Estimated"
         case .inferred: return "Inferred"
         case .userEntered: return "You entered this"
+        case .simulated: return "Simulated"
         case .unavailable: return "Unavailable"
         }
     }
@@ -38,6 +53,7 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         case .estimated: return "estimated"
         case .inferred: return "inferred from your driving pattern"
         case .userEntered: return "from what you entered"
+        case .simulated: return "from the simulator, not from your car"
         case .unavailable: return "unavailable"
         }
     }
@@ -52,6 +68,10 @@ enum DataProvenance: String, Codable, CaseIterable, Sendable {
         // the ceiling rather than the value, so a shaky conclusion built on a typed-in
         // number is still free to be unconfident about itself.
         case .userEntered: return 1.0
+        // Full marks on purpose. Scenarios exist to drive the insight pipeline hard --
+        // a hot-coolant scenario has to be able to raise a hot-coolant insight -- so the
+        // isolation belongs on the learning and history paths, not here.
+        case .simulated: return 1.0
         case .unavailable: return 0.0
         }
     }

@@ -21,7 +21,10 @@ final class AppSettings {
         self.roadImpactDetectionEnabled = defaults.bool(forKey: Key.roadImpactDetection)
         self.remindersEnabled = defaults.bool(forKey: Key.reminders)
         self.telemetryRetentionDays = defaults.object(forKey: Key.telemetryRetentionDays) as? Int ?? 180
-        self.useSimulator = defaults.bool(forKey: Key.useSimulator)
+        // Deliberately not just the stored value. A shipped build never uses the
+        // simulator, whatever a debug build left behind in this defaults domain --
+        // which also means every read site downstream is covered by this one line.
+        self.useSimulator = defaults.bool(forKey: Key.useSimulator) && Self.isSimulatorAvailable
         self.simulatorScenario = OBDScenarioID(rawValue: defaults.string(forKey: Key.simulatorScenario) ?? "") ?? .normalHighway
         self.hasCompletedOnboarding = defaults.bool(forKey: Key.hasCompletedOnboarding)
         self.lastAdapterIdentifier = defaults.string(forKey: Key.lastAdapter)
@@ -50,6 +53,21 @@ final class AppSettings {
     var roadImpactDetectionEnabled: Bool { didSet { defaults.set(roadImpactDetectionEnabled, forKey: Key.roadImpactDetection) } }
     var remindersEnabled: Bool { didSet { defaults.set(remindersEnabled, forKey: Key.reminders) } }
     var telemetryRetentionDays: Int { didSet { defaults.set(telemetryRetentionDays, forKey: Key.telemetryRetentionDays) } }
+    /// Whether the simulator may be offered or used at all.
+    ///
+    /// Debug builds only. It pushes synthetic readings through the same pipeline a real
+    /// adapter uses, and a shipped build has no business handing that to a driver -- least
+    /// of all one who might take it for their own car. Exposed as a value rather than
+    /// scattering `#if DEBUG` through the views, so those stay compiled in both
+    /// configurations and cannot quietly rot.
+    static var isSimulatorAvailable: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
+
     var useSimulator: Bool { didSet { defaults.set(useSimulator, forKey: Key.useSimulator) } }
     var simulatorScenario: OBDScenarioID { didSet { defaults.set(simulatorScenario.rawValue, forKey: Key.simulatorScenario) } }
     var hasCompletedOnboarding: Bool { didSet { defaults.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) } }
