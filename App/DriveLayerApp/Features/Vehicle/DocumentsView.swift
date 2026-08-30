@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The digital glovebox.
 ///
@@ -26,7 +27,9 @@ struct DocumentsView: View {
                 expiringSection
                 Section("All documents") {
                     ForEach(documents) { document in
-                        DocumentRow(document: document, formatter: formatter)
+                        NavigationLink(destination: DocumentDetailView(document: document)) {
+                            DocumentRow(document: document, formatter: formatter)
+                        }
                     }
                     .onDelete { offsets in
                         for index in offsets { environment.store.delete(documentID: documents[index].id) }
@@ -63,7 +66,9 @@ struct DocumentsView: View {
         if !expiring.isEmpty {
             Section("Needs attention") {
                 ForEach(expiring) { document in
-                    DocumentRow(document: document, formatter: formatter)
+                    NavigationLink(destination: DocumentDetailView(document: document)) {
+                        DocumentRow(document: document, formatter: formatter)
+                    }
                 }
             }
         }
@@ -116,16 +121,25 @@ struct AddDocumentView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.dismiss) private var dismiss
 
+    /// Generated up front so the scanned image can be filed under it before save.
+    @State private var documentID = UUID()
     @State private var kind: DocumentKind = .insurance
     @State private var title = ""
     @State private var provider = ""
     @State private var referenceNumber = ""
     @State private var hasExpiry = true
     @State private var expiryDate = Date().addingTimeInterval(365 * 86_400)
+    @State private var issueDate: Date?
+
+    @State private var isScanning = false
+    @State private var storedFileName: String?
+    @State private var wasExtractedAutomatically = false
+    @State private var scanSummary: String?
 
     var body: some View {
         NavigationStack {
             Form {
+                scanSection
                 Section {
                     Picker("Type", selection: $kind) {
                         ForEach(DocumentKind.allCases, id: \.self) { candidate in
@@ -145,7 +159,7 @@ struct AddDocumentView: View {
                     }
                 }
                 Section {
-                    Text("Scanning a document with the camera will fill these in automatically in a later version. Until then DriveLayer asks rather than guesses.")
+                    Text("Scans and their text are processed entirely on this device and stored with full file protection. Nothing is uploaded.")
                         .font(DL.Font.caption)
                         .foregroundStyle(DLColor.secondaryText)
                 }
@@ -153,19 +167,203 @@ struct AddDocumentView: View {
             .navigationTitle("Add document")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { cancel() }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave(DocumentRecord(vehicleID: environment.selectedVehicle?.id,
-                                              kind: kind,
-                                              title: title.isEmpty ? kind.displayName : title,
-                                              provider: provider.isEmpty ? nil : provider,
-                                              referenceNumber: referenceNumber.isEmpty ? nil : referenceNumber,
-                                              expiryDate: (kind.expires && hasExpiry) ? expiryDate : nil))
-                        dismiss()
+                    Button("Save") { save() }
+                }
+            }
+            .fullScreenCover(isPresented: $isScanning) {
+                DocumentScannerView(onComplete: apply, onCancel: { isScanning = false })
+                    .ignoresSafeArea()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var scanSection: some View {
+        Section {
+            if DocumentScannerView.isSupported {
+                Button {
+                    isScanning = true
+                } label: {
+                    Label(storedFileName == nil ? "Scan document" : "Rescan document",
+                          systemImage: "doc.viewfinder")
+                }
+            } else {
+                Text("This device can't scan documents. You can still type the details in.")
+                    .font(DL.Font.callout)
+                    .foregroundStyle(DLColor.secondaryText)
+            }
+            if let scanSummary {
+                Text(scanSummary)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(wasExtractedAutomatically ? DLColor.watch : DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } header: {
+            Text("Scan")
+        } footer: {
+            Text("Scanning fills these fields in from the page. Check them before saving — text recognition is a suggestion, not a reading.")
+        }
+    }
+
+    /// Applies what the scanner read, without overwriting anything already typed.
+    private func apply(_ result: DocumentScannerView.ScanResult) {
+        isScanning = false
+        let extraction = result.extraction
+
+        if let imageData = result.imageData {
+            storedFileName = DocumentFileStore.shared.store(data: imageData,
+                                                            documentID: documentID,
+                                                            fileExtension: "jpg")
+        }
+
+        if let suggested = extraction.suggestedKind { kind = suggested }
+        if referenceNumber.isEmpty, let reference = extraction.referenceNumber {
+            referenceNumber = reference
+        }
+        if let expiry = extraction.expiryDate {
+            expiryDate = expiry
+            hasExpiry = true
+        }
+        issueDate = extraction.issueDate
+        wasExtractedAutomatically = extraction.confidence > 0
+
+        if result.extraction.recognisedLineCount == 0 {
+            scanSummary = "The page was saved, but no text could be read from it. Fill the details in yourself."
+        } else if extraction.confidence <= 0 {
+            scanSummary = "Read \(result.extraction.recognisedLineCount) lines but couldn't identify any fields. Fill them in yourself."
+        } else {
+            scanSummary = "Filled in from the scan — please check the dates and reference number before saving."
+        }
+    }
+
+    private func save() {
+        let resolvedTitle = title.trimmingCharacters(in: .whitespaces)
+        onSave(DocumentRecord(id: documentID,
+                              vehicleID: environment.selectedVehicle?.id,
+                              kind: kind,
+                              title: resolvedTitle.isEmpty ? kind.displayName : resolvedTitle,
+                              provider: provider.isEmpty ? nil : provider,
+                              referenceNumber: referenceNumber.isEmpty ? nil : referenceNumber,
+                              issueDate: issueDate,
+                              expiryDate: (kind.expires && hasExpiry) ? expiryDate : nil,
+                              fileName: storedFileName,
+                              wasExtractedAutomatically: wasExtractedAutomatically))
+        dismiss()
+    }
+
+    /// A scan that is abandoned must not leave its image behind.
+    private func cancel() {
+        if storedFileName != nil {
+            DocumentFileStore.shared.delete(documentID: documentID)
+        }
+        dismiss()
+    }
+}
+
+/// One document: its details, its status, and the scan if there is one.
+struct DocumentDetailView: View {
+
+    let document: DocumentRecord
+
+    @Environment(AppEnvironment.self) private var environment
+    @State private var image: UIImage?
+    @State private var isRevealingReference = false
+
+    private var formatter: DisplayFormatter { environment.formatter }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: DL.Spacing.small) {
+                    Image(systemName: document.kind.symbolName)
+                        .foregroundStyle(DLColor.secondaryText)
+                    Text(document.kind.displayName)
+                        .font(DL.Font.body.weight(.medium))
+                    Spacer()
+                    if document.kind.expires {
+                        StatusIndicator(status: document.status(now: Date()))
                     }
+                }
+                .padding(.vertical, DL.Spacing.tight)
+
+                if document.wasExtractedAutomatically {
+                    Text("These details were read from a scan. Worth checking against the document itself.")
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.watch)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Section("Details") {
+                ValueOrReasonRow(label: "Provider", value: document.provider, reason: "Not recorded")
+                ValueOrReasonRow(label: "Issued", value: formatter.mediumDate(document.issueDate), reason: "Not recorded")
+                ValueOrReasonRow(label: "Expires",
+                                 value: formatter.mediumDate(document.expiryDate),
+                                 reason: document.kind.expires ? "Not recorded" : "Doesn't expire")
+                if let days = document.daysUntilExpiry(now: Date()) {
+                    ValueOrReasonRow(label: days < 0 ? "Expired" : "Days remaining",
+                                     value: "\(abs(days))")
+                }
+                referenceRow
+            }
+
+            Section("Scan") {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: DL.Radius.small, style: .continuous))
+                        .accessibilityLabel("Scanned \(document.kind.displayName.lowercased())")
+                } else if document.fileName == nil {
+                    Text("No scan was saved with this document.")
+                        .font(DL.Font.callout)
+                        .foregroundStyle(DLColor.secondaryText)
+                } else {
+                    Text("The scan couldn't be opened. It is stored with full file protection, so it is unreadable while the device is locked.")
+                        .font(DL.Font.callout)
+                        .foregroundStyle(DLColor.secondaryText)
                 }
             }
         }
+        .navigationTitle(document.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { loadImage() }
+    }
+
+    /// Hidden by default: a reference number is the sort of thing that gets read over
+    /// a shoulder, and the driver rarely needs it on screen.
+    @ViewBuilder
+    private var referenceRow: some View {
+        if let reference = document.referenceNumber {
+            Button {
+                isRevealingReference.toggle()
+            } label: {
+                HStack {
+                    Text("Reference")
+                        .foregroundStyle(DLColor.primaryText)
+                    Spacer()
+                    Text(isRevealingReference ? reference : PrivacyLog.redactedDocumentNumber(reference))
+                        .font(DL.Font.body.monospaced())
+                        .foregroundStyle(DLColor.secondaryText)
+                    Image(systemName: isRevealingReference ? "eye.slash" : "eye")
+                        .font(.caption)
+                        .foregroundStyle(DLColor.unknown)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isRevealingReference ? "Hide reference number" : "Show reference number")
+        } else {
+            ValueOrReasonRow(label: "Reference", value: nil, reason: "Not recorded")
+        }
+    }
+
+    private func loadImage() {
+        guard let fileName = document.fileName,
+              let data = DocumentFileStore.shared.read(fileName: fileName) else { return }
+        image = UIImage(data: data)
     }
 }
