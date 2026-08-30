@@ -21,7 +21,15 @@ the app report capability Level 3.
 Model-level specifications are known, but no vehicle-specific telemetry has been
 proven. DriveLayer restricts itself to standard OBD-II data.
 
-- **Tata Harrier — 2.0 Kryotec diesel, Adventure X+** (`tata.harrier.2026.adventure-x-plus`)
+- **Tata Harrier — 1.5 TGDi Hyperion turbo petrol, Adventure X+** (`tata.harrier.2026.adventure-x-plus`)
+
+  Rated power and torque are deliberately absent: the engine is recent enough that
+  a half-remembered brochure figure would be an invention, and a wrong figure would
+  quietly feed the load and economy wording. Tank capacity and the service interval
+  are carried over from the diesel variant and are labelled `genericDefault`, not
+  `publishedSpecification` — the UI shows that difference, and a driver can enter
+  their own. Being a petrol, it declares no DPF extension points and Diesel Guardian
+  reports `not applicable` for it.
 
 ### `generic`
 No model-specific knowledge: standard OBD-II behaviour and generic engineering

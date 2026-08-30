@@ -282,7 +282,10 @@ final class DieselGuardianTests: XCTestCase {
 
     private let vehicleID = UUID()
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
-    private let profile = VehicleProfileCatalog.harrier2026AdventureXPlus
+    /// A diesel profile, not the reference vehicle. These tests are about diesel
+    /// behaviour, so binding them to whichever engine the development car happens to
+    /// have is how a fuel-type change silently turns them into tests of nothing.
+    private let profile = VehicleProfileCatalog.genericDiesel
 
     private func trip(daysAgo: Int, km: Double, minutes: Double, peakCoolant: Double?) -> Trip {
         let start = now.addingTimeInterval(-Double(daysAgo) * 86_400)
@@ -296,6 +299,17 @@ final class DieselGuardianTests: XCTestCase {
 
     func testNotApplicableToPetrolVehicles() {
         let assessment = DieselGuardian.assess(trips: [], profile: VehicleProfileCatalog.genericPetrol, now: now)
+        XCTAssertFalse(assessment.isApplicable)
+    }
+
+    /// The reference vehicle is a 1.5-litre TGDi petrol. It has no particulate
+    /// filter to advise about, and a driver must never be shown DPF guidance for a
+    /// car that does not have one — even with plenty of short cold trips on record.
+    func testNotApplicableToTheReferenceVehicle() {
+        let trips = (1...8).map { trip(daysAgo: $0, km: 4, minutes: 9, peakCoolant: 58) }
+        let assessment = DieselGuardian.assess(trips: trips,
+                                               profile: VehicleProfileCatalog.harrier2026AdventureXPlus,
+                                               now: now)
         XCTAssertFalse(assessment.isApplicable)
     }
 

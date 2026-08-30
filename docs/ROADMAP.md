@@ -45,7 +45,7 @@ Environment findings that shaped everything after:
 - `VehicleProfile` with per-value `SpecSource`, engine-condition-scoped operating
   ranges, three validation tiers, and manufacturer capabilities that cannot carry a
   request unless validated.
-- Tata Harrier 2.0 Kryotec profile at `experimental`, plus generic diesel and petrol.
+- Tata Harrier 1.5 TGDi Hyperion petrol profile at `experimental`, plus generic diesel and petrol.
 - Garage with multiple vehicles, per-vehicle data isolation, and a delete that
   genuinely removes trips, baselines, fuel, maintenance, documents and telemetry.
 
@@ -157,7 +157,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 229 tests passing in CI. |
+| **Test execution** | 242 tests passing in CI. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
@@ -165,10 +165,7 @@ Honest list of what is scaffolding rather than working software.
 | **Route weather** | Analyser and waypoint builder are done and tested; nothing yet supplies a route, so it needs a destination or navigation integration to fire. |
 | **Document scanning** | Capture and on-device recognition are wired to the tested extractor. Compiled in CI; not yet exercised against a real document on hardware. |
 | **Road impact events** | Detection implemented and tested; events are recorded locally and not yet surfaced in the UI or corroborated across drives. |
-| **Live Activity range** | The field exists; the coordinator does not yet populate it. |
-| **Trip weather** | `Trip.weather` is modelled but not captured during a drive. |
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe. The last-drive widget opens the trip list rather than the drive itself — the widget snapshot carries no trip identifier. |
-| **Notifications** | No local notifications yet for expiring documents or overdue service. |
 | **Accessibility on device** | Contrast is enforced by tests and every metric has a spoken label, but nothing has been driven with VoiceOver or at the largest text sizes on real hardware. |
 | **Watch app** | Not started. |
 

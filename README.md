@@ -34,7 +34,7 @@ three pass**:
 | Job | Runner | What it proves |
 |---|---|---|
 | Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths |
-| Core tests | `macos-14` | `DriveLayerCore` compiles and its **239 tests across 34 suites** pass |
+| Core tests | `macos-14` | `DriveLayerCore` compiles and its **242 tests across 34 suites** pass |
 | App build | `macos-15` | The app and widget extension compile for the iOS Simulator |
 
 What is still **not** verified, and needs hardware:
@@ -74,7 +74,7 @@ The first two came from writing tests; the last two from CI.
 
 ```bash
 # Run the logic tests — no Xcode, no car, no phone required
-swift test          # 239 tests, 34 suites
+swift test          # 242 tests, 34 suites
 
 # Generate the Xcode project and open it
 brew install xcodegen
@@ -148,7 +148,7 @@ Sources/DriveLayerCore/    Foundation-only product logic — no UIKit, SwiftUI,
 App/DriveLayerApp/         The iOS app: design system, services, persistence, screens
 App/DriveLayerWidgets/     WidgetKit extension and the Live Activity
 App/Shared/                Types shared between app and extension
-Tests/DriveLayerCoreTests/ 239 tests, weighted towards failure cases
+Tests/DriveLayerCoreTests/ 242 tests, weighted towards failure cases
 Tools/swiftcheck.py        Static consistency checker
 docs/                      Architecture, product, OBD, CarPlay, profiles, privacy, roadmap
 ```
@@ -165,10 +165,17 @@ docs/                      Architecture, product, OBD, CarPlay, profiles, privac
 
 ## Reference vehicle
 
-Development is calibrated around a **Tata Harrier, 2.0 Kryotec diesel**, but nothing
-is hard-coded to it: it is one entry in a profile catalog, and the generic diesel and
-petrol profiles work with any OBD-II vehicle. See
+Development is calibrated around a **Tata Harrier, 1.5-litre TGDi Hyperion turbo
+petrol**, but nothing is hard-coded to it: it is one entry in a profile catalog, and
+the generic diesel and petrol profiles work with any OBD-II vehicle. See
 [VEHICLE_PROFILES.md](docs/VEHICLE_PROFILES.md) for how to add another.
+
+The reference vehicle changed engine partway through development, from the 2.0
+Kryotec diesel to this one. Nothing outside the profile entry and its tests had to
+change — Diesel Guardian switched itself off through `fuelType`, and the copilot
+already answered particulate-filter questions with "this vehicle isn't a diesel".
+That is the multi-vehicle architecture doing the job it was built for, and it is the
+closest thing to a proof of it so far.
 
 ## Licence
 

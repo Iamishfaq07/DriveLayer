@@ -124,6 +124,12 @@ It never says "your DPF is 68% full". It never offers a regeneration. And where
 coolant temperature is unavailable, warm-up completion is marked `inferred` from
 drive duration rather than passed off as measured.
 
+It also knows when not to speak at all. The whole feature is gated on the profile's
+`fuelType`, so a petrol car — including the reference vehicle, a 1.5 TGDi Hyperion —
+gets nothing from it, and asking the copilot about regeneration returns "this vehicle
+isn't a diesel, so particulate filter behaviour doesn't apply." Filter advice for a
+car with no filter is not a harmless extra.
+
 ## The copilot
 
 On-device, deterministic, offline. Every sentence is badged **Measured**,

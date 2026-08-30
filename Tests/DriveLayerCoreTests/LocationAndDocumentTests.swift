@@ -313,9 +313,34 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertFalse(harrier.notes.isEmpty)
     }
 
+    /// The reference vehicle now declares no extension points at all, so asserting
+    /// its usable set is empty proves nothing on its own. This keeps the real rule
+    /// under test: a declared but unvalidated capability is never usable.
+    func testDeclaredButUnvalidatedCapabilitiesAreNeverUsable() {
+        let diesel = VehicleProfileCatalog.genericDiesel
+        XCTAssertFalse(diesel.manufacturerCapabilities.isEmpty,
+                       "this test needs a profile that actually declares extension points")
+        XCTAssertTrue(diesel.usableManufacturerCapabilities.isEmpty)
+    }
+
+    /// The reference vehicle is a 1.5-litre TGDi petrol, so nothing about it may be
+    /// described in diesel terms — and the figures carried over from the diesel
+    /// variant must not be labelled as published for this engine.
+    func testReferenceProfileIsThePetrolEngine() {
+        XCTAssertEqual(harrier.fuelType, .petrol)
+        XCTAssertEqual(harrier.engine.displacementLitres, 1.5)
+        XCTAssertNil(harrier.engine.ratedPowerPS,
+                     "an unsourced brochure figure is worse than no figure")
+        XCTAssertNil(harrier.engine.ratedTorqueNm)
+        XCTAssertTrue(harrier.manufacturerCapabilities.isEmpty,
+                      "DPF and exhaust-temperature extension points belong to a diesel")
+    }
+
     func testSpecSourcesAreRecorded() throws {
         XCTAssertEqual(harrier.tankCapacityLitres, 50)
-        XCTAssertEqual(harrier.tankCapacitySource, .publishedSpecification)
+        XCTAssertEqual(harrier.tankCapacitySource, .genericDefault,
+                       "50 L is the diesel variant's published figure, carried over unverified")
+        XCTAssertFalse(harrier.tankCapacitySource.isVehicleSpecific)
         let genericInterval = try XCTUnwrap(harrier.serviceInterval(id: "air-filter"))
         XCTAssertEqual(genericInterval.source, .genericDefault)
         XCTAssertFalse(genericInterval.source.isVehicleSpecific)
