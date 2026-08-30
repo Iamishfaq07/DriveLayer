@@ -47,7 +47,7 @@ struct OnboardingView: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: DL.Spacing.medium) {
             Text("DriveLayer")
-                .font(DL.Font.hero)
+                .dlFont(.hero)
                 .foregroundStyle(DLColor.primaryText)
             Text("Intelligence for the car you already own.")
                 .font(DL.Font.title)
@@ -150,7 +150,7 @@ struct OnboardingView: View {
     private func stepTitle(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: DL.Spacing.tight) {
             Text(title)
-                .font(DL.Font.display)
+                .dlFont(.display)
                 .foregroundStyle(DLColor.primaryText)
             Text(subtitle)
                 .font(DL.Font.callout)

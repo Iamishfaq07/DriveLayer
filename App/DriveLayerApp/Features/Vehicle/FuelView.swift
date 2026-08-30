@@ -38,21 +38,22 @@ struct FuelView: View {
     private var statusSection: some View {
         let status = environment.drive.fuelStatus
         return Section {
-            HStack {
+            DLAdaptiveRow {
                 MetricView(label: "Level",
                            value: formatter.percent(status.levelPercent.value),
                            unit: "%",
                            provenance: status.levelPercent.provenance)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Range",
                            value: formatter.distance(kilometres: status.estimatedRangeKm.value, fractionDigits: 0),
                            unit: formatter.distanceUnitLabel,
                            provenance: status.estimatedRangeKm.provenance)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Typical economy",
                            value: formatter.economy(kmPerLitre: status.economyKmPerLitre),
                            unit: formatter.economyUnitLabel,
                            provenance: .estimated)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, DL.Spacing.tight)
 

@@ -169,6 +169,7 @@ Honest list of what is scaffolding rather than working software.
 | **Trip weather** | `Trip.weather` is modelled but not captured during a drive. |
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe. The last-drive widget opens the trip list rather than the drive itself — the widget snapshot carries no trip identifier. |
 | **Notifications** | No local notifications yet for expiring documents or overdue service. |
+| **Accessibility on device** | Contrast is enforced by tests and every metric has a spoken label, but nothing has been driven with VoiceOver or at the largest text sizes on real hardware. |
 | **Watch app** | Not started. |
 
 ## Next up (V1 completion)
@@ -178,8 +179,10 @@ Honest list of what is scaffolding rather than working software.
 3. ~~Populate Live Activity range and capture trip weather.~~ **Done.**
 4. ~~Wire the VisionKit capture flow to the existing, tested extractor.~~ **Done.**
 5. ~~Widget deep links.~~ **Done.**
-6. Accessibility pass: Dynamic Type at the largest sizes, VoiceOver labels on every
-   metric, contrast check on the status palette.
+6. ~~Accessibility pass: Dynamic Type at the largest sizes, VoiceOver labels on every
+   metric, contrast check on the status palette.~~ **Done** — the contrast check is
+   now a test rather than a one-off, and it found three failing colours. Not yet
+   verified with VoiceOver on a device.
 7. Run it on a device against a real adapter — the first thing that will find
    problems no amount of CI can.
 

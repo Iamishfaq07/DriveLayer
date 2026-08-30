@@ -49,7 +49,7 @@ struct VehicleContentView: View {
                     HStack(spacing: DL.Spacing.small) {
                         StatusIndicator(status: health.overall, showsLabel: false, size: 22)
                         Text(health.headline)
-                            .font(DL.Font.display)
+                            .dlFont(.display)
                             .foregroundStyle(DLColor.primaryText)
                     }
                     if health.isLimitedByMissingData {
@@ -233,7 +233,7 @@ struct TroubleCodeDetailView: View {
             Section {
                 VStack(alignment: .leading, spacing: DL.Spacing.tight) {
                     Text(code.code)
-                        .font(DL.Font.display.monospaced())
+                        .dlFont(.display, usesMonospacedDigits: true)
                         .foregroundStyle(DLColor.primaryText)
                     Text(explanation.standardDefinition)
                         .font(DL.Font.body)

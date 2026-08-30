@@ -63,8 +63,7 @@ struct DriveView: View {
             SectionLabel(text: drive.isRecording ? "Recording" : "Speed")
             HStack(alignment: .firstTextBaseline, spacing: DL.Spacing.tight) {
                 Text(formatter.speed(kmh: speedKmh) ?? "—")
-                    .font(DL.Font.hero)
-                    .monospacedDigit()
+                    .dlFont(.hero, usesMonospacedDigits: true)
                     .contentTransition(.numericText())
                     .foregroundStyle(speedKmh == nil ? DLColor.unknown : DLColor.primaryText)
                 Text(formatter.speedUnitLabel)
@@ -81,25 +80,26 @@ struct DriveView: View {
     }
 
     private var tripRow: some View {
-        HStack(alignment: .top, spacing: DL.Spacing.medium) {
+        DLAdaptiveRow {
             MetricView(label: "Distance",
                        value: formatter.distance(metres: drive.currentTrip?.distanceMetres),
                        unit: formatter.distanceUnitLabel)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             MetricView(label: "Duration",
                        value: formatter.duration(seconds: drive.currentTrip?.totalDurationSeconds),
                        unit: nil)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             MetricView(label: "Altitude",
                        value: environment.motion.latestAltitude.map { String(Int($0.altitudeMetres.rounded())) }
                             ?? environment.location.latest?.altitudeMetres.map { String(Int($0.rounded())) },
                        unit: "m",
                        provenance: environment.motion.latestAltitude == nil ? .measured : .estimated)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             MetricView(label: "Range",
                        value: formatter.distance(kilometres: drive.fuelStatus.estimatedRangeKm.value, fractionDigits: 0),
                        unit: formatter.distanceUnitLabel,
                        provenance: drive.fuelStatus.estimatedRangeKm.provenance)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .dlCard()
     }

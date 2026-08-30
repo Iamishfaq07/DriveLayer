@@ -314,6 +314,7 @@ ActivityAuthorizationInfo ActivityConfiguration DynamicIsland DynamicIslandExpan
 AppIntents AppIntent AppShortcut AppShortcutsProvider IntentDescription Parameter
 IntentParameter EntityQuery AppEntity DisplayRepresentation TypeDisplayRepresentation
 IntentResult ProvidesDialog ShowsSnippetView IntentDialog AppIntentsPackage
+ViewModifier ScaledMetric DynamicTypeSize TextStyle Weight Design Content
 VisionKit VNDocumentCameraViewController VNDocumentCameraScan Vision VNRecognizeTextRequest
 VNImageRequestHandler VNRecognizedTextObservation VNRequest VNDocumentCameraViewControllerDelegate
 UIViewControllerRepresentable UIViewRepresentable CGImage CGImageSource
@@ -491,6 +492,11 @@ def main() -> int:
         for match in member_re.finditer(code):
             type_name, member = match.group(1), match.group(2)
             if type_name not in members:
+                continue
+            # A qualified path such as `SwiftUI.Font.system` names SwiftUI's Font,
+            # not the project's. Without this the checker resolves the last segment
+            # it recognises and reports a member the framework type really has.
+            if match.start() > 0 and code[match.start() - 1] == ".":
                 continue
             if member in SYNTHESISED_MEMBERS or member in members[type_name]:
                 continue

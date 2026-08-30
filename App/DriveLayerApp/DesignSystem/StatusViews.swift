@@ -8,12 +8,17 @@ import SwiftUI
 struct StatusIndicator: View {
     let status: SemanticStatus
     var showsLabel: Bool = true
+    /// A base size, not a fixed one — it is multiplied by the text-size scale below.
     var size: CGFloat = 15
+
+    /// Anchored to `callout`, the size of the label beside it, so the mark and the
+    /// word grow together instead of the symbol staying stubbornly small.
+    @ScaledMetric(relativeTo: .callout) private var scale: CGFloat = 1
 
     var body: some View {
         HStack(spacing: DL.Spacing.tight) {
             Image(systemName: status.symbolName)
-                .font(.system(size: size, weight: .semibold))
+                .font(.system(size: size * scale, weight: .semibold))
                 .foregroundStyle(DLColor.status(status))
             if showsLabel {
                 Text(status.label)
@@ -49,13 +54,15 @@ struct MetricView: View {
     var status: SemanticStatus?
     var emphasis: Emphasis = .standard
 
-    enum Emphasis { case standard, large, hero }
+    enum Emphasis {
+        case standard, large, hero
 
-    private var valueFont: Font {
-        switch emphasis {
-        case .standard: return DL.Font.metric
-        case .large: return DL.Font.display
-        case .hero: return DL.Font.hero
+        var font: DL.ScaledFont {
+            switch self {
+            case .standard: return .metric
+            case .large: return .display
+            case .hero: return .hero
+            }
         }
     }
 
@@ -65,7 +72,7 @@ struct MetricView: View {
             if let value {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value)
-                        .font(valueFont)
+                        .dlFont(emphasis.font)
                         .foregroundStyle(status.map(DLColor.status) ?? DLColor.primaryText)
                         .contentTransition(.numericText())
                     if let unit {
@@ -82,11 +89,26 @@ struct MetricView: View {
             } else {
                 // An unavailable value is a dash and a reason, never a zero.
                 Text("—")
-                    .font(valueFont)
+                    .dlFont(emphasis.font)
                     .foregroundStyle(DLColor.unknown)
-                    .accessibilityLabel("Not available")
             }
         }
+        // One element, one sentence. Read as separate children this is four swipes
+        // — "Range", "326", "km", "estimated" — and the qualifier ends up detached
+        // from the number it qualifies, which is exactly the thing it must not be.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(spokenDescription))
+    }
+
+    private var spokenDescription: String {
+        guard let value else { return "\(label): not available" }
+        var spoken = "\(label): \(value)"
+        if let unit { spoken += " \(unit)" }
+        if provenance != .measured, let qualifier = provenance.userFacingQualifier {
+            spoken += ", \(qualifier)"
+        }
+        if let status { spoken += ", \(status.label)" }
+        return spoken
     }
 }
 
@@ -113,6 +135,8 @@ struct SystemRow: View {
             StatusIndicator(status: system.status, showsLabel: false, size: 17)
         }
         .padding(.vertical, DL.Spacing.tight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(system.kind.displayName), \(system.status.label). \(system.headline)"))
     }
 }
 
@@ -127,6 +151,7 @@ struct InsightCard: View {
                 Image(systemName: insight.severity == .normal ? insight.category.symbolName : insight.severity.symbolName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DLColor.status(insight.severity))
+                    .accessibilityHidden(true)
                 Text(insight.title)
                     .font(DL.Font.label)
                     .tracking(0.8)
@@ -158,6 +183,9 @@ struct InsightCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dlCard()
+        // A card is one thought. Combining keeps the title, the summary and the
+        // reasoning in one utterance instead of four separate swipes.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -183,8 +211,16 @@ struct EvidenceRow: View {
                             .foregroundStyle(DLColor.unknown)
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(spoken(datum)))
             }
         }
+    }
+
+    private func spoken(_ datum: InsightSourceDatum) -> String {
+        var text = "\(datum.label): \(datum.formattedValue)"
+        if datum.provenance != .measured { text += ", \(datum.provenance.label.lowercased())" }
+        return text
     }
 }
 

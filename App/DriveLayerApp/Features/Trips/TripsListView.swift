@@ -42,17 +42,18 @@ struct TripsListView: View {
     private var summarySection: some View {
         let analytics = TripAnalytics.summarise(trips)
         return Section {
-            HStack {
+            DLAdaptiveRow {
                 MetricView(label: "Drives", value: "\(analytics.tripCount)")
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Distance",
                            value: formatter.distance(kilometres: analytics.totalDistanceKm, fractionDigits: 0),
                            unit: formatter.distanceUnitLabel)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Typical economy",
                            value: formatter.economy(kmPerLitre: analytics.medianEconomyKmPerLitre),
                            unit: formatter.economyUnitLabel,
                            provenance: .estimated)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, DL.Spacing.tight)
         }

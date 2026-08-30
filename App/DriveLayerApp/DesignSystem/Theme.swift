@@ -26,17 +26,47 @@ enum DL {
 
     /// Type scale. Numbers that matter are large and rounded; supporting text is
     /// small, quiet, and uppercase only for labels.
+    ///
+    /// These are all built on text styles, so they follow the driver's text-size
+    /// setting. The three chosen sizes that are not text styles live in
+    /// `DL.ScaledFont` and are applied with `.dlFont(_:)`.
     enum Font {
-        /// The one number a screen is about.
-        static var hero: SwiftUI.Font { .system(size: 56, weight: .medium, design: .rounded) }
-        static var display: SwiftUI.Font { .system(size: 34, weight: .medium, design: .rounded) }
-        static var metric: SwiftUI.Font { .system(size: 24, weight: .medium, design: .rounded) }
         static var title: SwiftUI.Font { .system(.title3, design: .default).weight(.semibold) }
         static var body: SwiftUI.Font { .system(.body) }
         static var callout: SwiftUI.Font { .system(.callout) }
         static var caption: SwiftUI.Font { .system(.caption) }
         /// Small uppercase label with tracking, used for section headers.
         static var label: SwiftUI.Font { .system(.caption, design: .default).weight(.semibold) }
+    }
+
+    /// The three sizes chosen by hand rather than inherited from a text style.
+    ///
+    /// `Font.system(size:)` ignores the text-size setting completely. Used naively
+    /// that makes the large, meaningful numbers — the whole point of the design — the
+    /// one thing on screen that will not grow for a driver who needs it larger.
+    /// Anchoring each size to a text style with `@ScaledMetric` gives that back.
+    enum ScaledFont {
+        /// The one number a screen is about.
+        case hero
+        case display
+        case metric
+
+        var size: CGFloat {
+            switch self {
+            case .hero: return 56
+            case .display: return 34
+            case .metric: return 24
+            }
+        }
+
+        /// The style each size scales in step with. `largeTitle` is 34pt by default,
+        /// which is `display` exactly; `title` is 28pt, nearest to `metric`.
+        var textStyle: SwiftUI.Font.TextStyle {
+            switch self {
+            case .hero, .display: return .largeTitle
+            case .metric: return .title
+            }
+        }
     }
 
     enum Opacity {
@@ -57,43 +87,40 @@ enum DL {
 
 /// Semantic colours.
 ///
-/// Defined in code rather than an asset catalog so the palette is reviewable in one
-/// place and stays in step with `SemanticStatus`. Every status colour is paired with
-/// a distinct symbol elsewhere in the system — colour is never the only signal.
+/// The values themselves live in `Palette`, in the core, where `PaletteTests` checks
+/// every one of them against every surface it can land on. This layer only turns
+/// them into `Color` and picks the appearance — so a colour cannot be changed to
+/// something unreadable without a test failing.
 enum DLColor {
 
-    static func dynamic(light: (Double, Double, Double), dark: (Double, Double, Double)) -> Color {
+    /// Resolves per trait collection, so it follows the system appearance and, on a
+    /// CarPlay screen, the car's day/night mode.
+    private static func dynamic(_ resolve: @escaping @Sendable (Palette.Appearance) -> RGB) -> Color {
         Color(uiColor: UIColor { traits in
-            let components = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: components.0, green: components.1, blue: components.2, alpha: 1)
+            let colour = resolve(traits.userInterfaceStyle == .dark ? .dark : .light)
+            return UIColor(red: colour.red, green: colour.green, blue: colour.blue, alpha: 1)
         })
     }
 
     // Surfaces. Dark mode is the primary case: this is an app used in a car at night.
-    static let background = dynamic(light: (0.96, 0.96, 0.97), dark: (0.05, 0.05, 0.06))
-    static let surface = dynamic(light: (1, 1, 1), dark: (0.10, 0.10, 0.12))
-    static let surfaceRaised = dynamic(light: (1, 1, 1), dark: (0.14, 0.14, 0.16))
+    static let background = dynamic(Palette.background)
+    static let surface = dynamic(Palette.surface)
+    static let surfaceRaised = dynamic(Palette.surfaceRaised)
 
-    static let primaryText = dynamic(light: (0.08, 0.08, 0.09), dark: (0.96, 0.96, 0.97))
-    static let secondaryText = dynamic(light: (0.36, 0.36, 0.40), dark: (0.66, 0.66, 0.70))
+    static let primaryText = dynamic(Palette.primaryText)
+    static let secondaryText = dynamic(Palette.secondaryText)
 
     /// The single accent, used for interactive elements only.
-    static let accent = dynamic(light: (0.11, 0.42, 0.85), dark: (0.36, 0.64, 1.0))
+    static let accent = dynamic(Palette.accent)
 
-    static let normal = dynamic(light: (0.12, 0.55, 0.33), dark: (0.36, 0.80, 0.52))
-    static let watch = dynamic(light: (0.72, 0.51, 0.05), dark: (0.95, 0.75, 0.28))
-    static let attention = dynamic(light: (0.83, 0.42, 0.09), dark: (1.0, 0.62, 0.28))
-    static let critical = dynamic(light: (0.76, 0.16, 0.16), dark: (1.0, 0.44, 0.42))
-    static let unknown = dynamic(light: (0.45, 0.45, 0.50), dark: (0.55, 0.55, 0.60))
+    static let normal = status(.normal)
+    static let watch = status(.watch)
+    static let attention = status(.attention)
+    static let critical = status(.critical)
+    static let unknown = status(.unknown)
 
     static func status(_ status: SemanticStatus) -> Color {
-        switch status {
-        case .normal: return normal
-        case .watch: return watch
-        case .attention: return attention
-        case .critical: return critical
-        case .unknown: return unknown
-        }
+        dynamic { Palette.status(status, $0) }
     }
 
     /// Provenance is shown with weight, not hue: measured values read as certain,
@@ -107,7 +134,36 @@ enum DLColor {
     }
 }
 
+/// Applies a chosen point size that still honours Dynamic Type.
+private struct ScaledSystemFont: ViewModifier {
+
+    @ScaledMetric private var size: CGFloat
+    private let weight: SwiftUI.Font.Weight
+    private let usesMonospacedDigits: Bool
+
+    init(_ font: DL.ScaledFont, weight: SwiftUI.Font.Weight, usesMonospacedDigits: Bool) {
+        _size = ScaledMetric(wrappedValue: font.size, relativeTo: font.textStyle)
+        self.weight = weight
+        self.usesMonospacedDigits = usesMonospacedDigits
+    }
+
+    func body(content: Content) -> some View {
+        let font = SwiftUI.Font.system(size: size, weight: weight, design: .rounded)
+        return content.font(usesMonospacedDigits ? font.monospacedDigit() : font)
+    }
+}
+
 extension View {
+    /// One of the design system's large sizes, scaled to the driver's text setting.
+    ///
+    /// Monospaced digits are an option rather than the default: they stop a live
+    /// value jittering as it counts, and cost a little legibility everywhere else.
+    func dlFont(_ font: DL.ScaledFont,
+                weight: SwiftUI.Font.Weight = .medium,
+                usesMonospacedDigits: Bool = false) -> some View {
+        modifier(ScaledSystemFont(font, weight: weight, usesMonospacedDigits: usesMonospacedDigits))
+    }
+
     /// The standard card surface.
     func dlCard(padding: CGFloat = DL.Spacing.medium) -> some View {
         self
@@ -117,5 +173,29 @@ extension View {
 
     func dlScreenPadding() -> some View {
         padding(.horizontal, DL.Spacing.screen)
+    }
+}
+
+/// A row that becomes a column once the text is large enough that a row would
+/// squeeze each item down to a few characters.
+///
+/// Children size themselves, so give each one
+/// `.frame(maxWidth: .infinity, alignment: .leading)` to share the width evenly —
+/// that reads correctly in both directions, where a `Spacer` between them would
+/// turn into a gap once stacked.
+struct DLAdaptiveRow<Content: View>: View {
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var spacing: CGFloat = DL.Spacing.medium
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: spacing) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .top, spacing: spacing) { content }
+        }
     }
 }

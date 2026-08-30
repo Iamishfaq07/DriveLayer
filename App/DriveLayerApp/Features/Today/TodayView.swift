@@ -11,6 +11,7 @@ struct TodayView: View {
     @Binding var path: [DeepLink]
 
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isShowingCopilot = false
 
     private var formatter: DisplayFormatter { environment.formatter }
@@ -78,7 +79,7 @@ struct TodayView: View {
                 .font(DL.Font.callout)
                 .foregroundStyle(DLColor.secondaryText)
             Text(environment.selectedVehicle?.nickname ?? "DriveLayer")
-                .font(DL.Font.display)
+                .dlFont(.display)
                 .foregroundStyle(DLColor.primaryText)
             Text(readinessLine)
                 .font(DL.Font.callout)
@@ -108,7 +109,7 @@ struct TodayView: View {
                     HStack(spacing: DL.Spacing.small) {
                         StatusIndicator(status: health.overall, showsLabel: false, size: 20)
                         Text(health.headline)
-                            .font(DL.Font.metric)
+                            .dlFont(.metric)
                             .foregroundStyle(DLColor.primaryText)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -139,8 +140,16 @@ struct TodayView: View {
         return "Everything DriveLayer can see looks normal."
     }
 
+    /// Two tiles across at accessibility text sizes leaves each about eight
+    /// characters wide. One column is less pretty and actually readable.
+    private var quickFactColumns: [GridItem] {
+        dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible()), GridItem(.flexible())]
+    }
+
     private var quickFacts: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DL.Spacing.medium) {
+        LazyVGrid(columns: quickFactColumns, spacing: DL.Spacing.medium) {
             MetricView(label: "Range",
                        value: formatter.distance(kilometres: drive.fuelStatus.estimatedRangeKm.value, fractionDigits: 0),
                        unit: formatter.distanceUnitLabel,
@@ -169,7 +178,7 @@ struct TodayView: View {
             SectionLabel(text: "Last drive")
             if let lastTrip {
                 Text(formatter.distance(metres: lastTrip.distanceMetres) ?? "—")
-                    .font(DL.Font.metric)
+                    .dlFont(.metric)
                     .foregroundStyle(DLColor.primaryText)
                 Text([formatter.duration(seconds: lastTrip.totalDurationSeconds),
                       formatter.economy(kmPerLitre: lastTrip.economyKmPerLitre).map { "\($0) \(formatter.economyUnitLabel)" }]
@@ -178,7 +187,7 @@ struct TodayView: View {
                     .foregroundStyle(DLColor.secondaryText)
             } else {
                 Text("—")
-                    .font(DL.Font.metric)
+                    .dlFont(.metric)
                     .foregroundStyle(DLColor.unknown)
                 Text("No drives recorded yet")
                     .font(DL.Font.caption)
@@ -198,7 +207,7 @@ struct TodayView: View {
                     Image(systemName: weather.condition.symbolName)
                         .foregroundStyle(DLColor.secondaryText)
                     Text(formatter.temperature(celsius: weather.temperatureC).map { "\($0)\(formatter.temperatureUnitLabel)" } ?? "—")
-                        .font(DL.Font.metric)
+                        .dlFont(.metric)
                         .foregroundStyle(DLColor.primaryText)
                 }
                 Text(drive.weatherChanges.first?.detail ?? weather.condition.displayName)
@@ -207,7 +216,7 @@ struct TodayView: View {
                     .lineLimit(2)
             } else {
                 Text("—")
-                    .font(DL.Font.metric)
+                    .dlFont(.metric)
                     .foregroundStyle(DLColor.unknown)
                 Text(drive.weatherUnavailability?.title ?? "Not available")
                     .font(DL.Font.caption)

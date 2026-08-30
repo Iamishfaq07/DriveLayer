@@ -39,16 +39,17 @@ struct TripDetailView: View {
 
     private var overviewSection: some View {
         Section {
-            HStack {
+            DLAdaptiveRow {
                 MetricView(label: "Distance",
                            value: formatter.distance(metres: trip.distanceMetres),
                            unit: formatter.distanceUnitLabel)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Duration", value: formatter.duration(seconds: trip.totalDurationSeconds))
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 MetricView(label: "Average",
                            value: formatter.speed(kmh: trip.averageSpeedKmh),
                            unit: formatter.speedUnitLabel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, DL.Spacing.tight)
 

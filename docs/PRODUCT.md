@@ -172,3 +172,32 @@ VEHICLE DATA
 Connect a supported Bluetooth OBD-II adapter to unlock live engine
 and vehicle information.
 ```
+
+## Accessibility
+
+Three things, all of which are load-bearing in a car.
+
+**Colour is never the only signal.** Every `SemanticStatus` has a distinct symbol —
+a filled disc for normal, a triangle for watch and attention, an octagon for
+critical, a question mark for unknown — so a status survives greyscale, glare and
+colour blindness. Colour still has to be readable: the palette lives in
+`Palette` in the core, and `PaletteTests` asserts every foreground clears WCAG AA
+(4.5:1) against every surface it can land on, in both appearances. The light-mode
+green, amber and orange are deeper than a conventional traffic-light palette because
+the conventional ones failed at around 3.1:1 on a near-white background. The green
+is deeper still so that it does not collapse onto the critical red in greyscale —
+the two states that mean opposite things.
+
+**Type scales.** `Font.system(size:)` ignores the text-size setting entirely, which
+would have made the large numbers — the whole point of the design — the one thing on
+screen that refuses to grow. `DL.ScaledFont` anchors each chosen size to a text style
+so it scales, and `DLAdaptiveRow` turns a row of metrics into a column once a row
+would squeeze each one to a few characters.
+
+**VoiceOver reads a thought, not a pile of fragments.** A metric is one element
+saying "Range: 326 km, estimated" rather than four separate swipes, so the qualifier
+can never be detached from the number it qualifies. A system row speaks its status.
+An insight card is one utterance. Decorative symbols are hidden.
+
+None of this has been verified with VoiceOver on a device — that needs hardware, and
+it is on the list.

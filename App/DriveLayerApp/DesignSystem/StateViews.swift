@@ -15,6 +15,7 @@ struct DLEmptyState: View {
             Image(systemName: symbol)
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(DLColor.unknown)
+                .accessibilityHidden(true)
             VStack(spacing: DL.Spacing.tight) {
                 Text(title)
                     .font(DL.Font.title)
@@ -127,5 +128,17 @@ struct ValueOrReasonRow: View {
                     .multilineTextAlignment(.trailing)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(spokenDescription))
+    }
+
+    private var spokenDescription: String {
+        guard let value else { return "\(label): \(reason ?? "not reported")" }
+        var spoken = "\(label): \(value)"
+        if let unit { spoken += " \(unit)" }
+        if provenance != .measured, let qualifier = provenance.userFacingQualifier {
+            spoken += ", \(qualifier)"
+        }
+        return spoken
     }
 }
