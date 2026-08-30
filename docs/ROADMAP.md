@@ -2,9 +2,9 @@
 
 Maintained as work proceeds.
 
-**CI is green at `a2a0399`.** All four jobs pass: static checks, `swift build` +
-`swift test` (397 tests across 46 suites) on macOS, the app test target (21 tests
-across 3 suites), and an Xcode build of the app and widget extension for the iOS
+**CI is green at `e2b3ed3`.** All four jobs pass: static checks, `swift build` +
+`swift test` (441 tests across 49 suites) on macOS, the app test target (40 tests
+across 6 suites), and an Xcode build of the app and widget extension for the iOS
 Simulator. What remains unverified needs hardware — see "Known gaps" at the end of
 this file.
 
@@ -179,7 +179,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 418 tests passing in CI at `062386e`: 397 via `swift test`, 21 in the app target. |
+| **Test execution** | 481 tests passing in CI at `e2b3ed3`: 441 via `swift test`, 40 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
@@ -368,14 +368,44 @@ happens with no request in flight, and the resulting `.notConnected` fails the
 
 ## P1 — Hyperion intelligence
 
-Not started. Ordered as in the brief: remove diesel product logic, wire a real
-`HyperionGuardian` end to end, structured fuel system status, fuel trims, turbo and air,
-warm-up, heat soak, battery trends, MIL and DTC events, aftertreatment, contextual
-baselines.
+| # | Item | Status |
+|---|---|---|
+| P1-11 | Remove diesel product logic | ALREADY FIXED — unreachable on a petrol profile; see below |
+| P1-12 | Wire `HyperionGuardian` end to end | IMPLEMENTED — 2 of 6 areas assessed |
+| P1-13 | Structured fuel system status (`01 03`) | Not started |
+| P1-14 | Fuel trim intelligence | Not started · BLOCKED ON HARDWARE for the PIDs (V-4) |
+| P1-15 | Turbo and air, estimated boost | Not started · BLOCKED ON HARDWARE (V-6) |
+| P1-16 | Warm-up intelligence and history | PARTIAL — model wired, per-drive history not stored |
+| P1-17 | Heat soak | IMPLEMENTED — live through `HyperionGuardian` |
+| P1-18 | Battery trends | Not started |
+| P1-19 | MIL and DTC events | Not started |
+| P1-20 | Aftertreatment | Not started |
+| P1-21 | Expanded contextual baselines | Not started |
 
-The Hyperion data layer that already exists — `EngineThermalModel`, `SensorGate`,
-`HeatSoakAnalyser`, `InsightConfidence` — is **MOCK ONLY** by the definition above: tested,
-and called by nothing. Wiring it is the first P1 task, not writing more analysers.
+**P1-11 was verified rather than assumed, and the brief's premise did not hold.** No
+diesel content can reach a Harrier owner: `DieselGuardian.assess` guards on
+`profile.fuelType.isDiesel` and returns `.notApplicable` for petrol, and all three
+consumers gate on `isApplicable` — `DieselUsageRule` returns nothing,
+`VehicleHealthEvaluator.dieselUsage` returns nil so no "Diesel usage" system is built, and
+the CarPlay row was never appended. It is dead code for this product rather than a
+user-facing defect, so it was left in place rather than half-migrated: renaming `Diesel/`
+into an aftertreatment abstraction is the coherent change the brief itself asks for, and
+doing it in passing is how a half-migration happens. The one dead diesel surface removed
+was the CarPlay row, because Hyperion now occupies that line.
+
+**P1-12 closed the finding this whole pass opened with.** `EngineThermalModel`,
+`HeatSoakAnalyser`, `SensorGate` and `InsightConfidence` were tested and called by nothing.
+`HyperionGuardian` assembles them, the coordinator publishes an assessment each analysis
+pass, and CarPlay reads it.
+
+Two areas of six are assessed — engine state and air/turbo. The other four are present and
+each carries the reason it is not assessed yet, which is deliberate: an unbuilt area that
+says so is more useful than an absent one, and unassessed areas are excluded from the
+overall status because `unknown` outranks `normal` in a roll-up and would otherwise report
+the whole engine as unknown while every reading says it is fine.
+
+Air and turbo is the intake-versus-ambient story only. Estimated boost from MAP minus
+barometric pressure joins it when V-5 confirms those PIDs on the real car, and not before.
 
 ## P2 — trip and route quality
 
