@@ -48,16 +48,66 @@ final class DriveSessionRecoveryTests: XCTestCase {
     /// Location and motion are real objects that simply never receive a fix in a test
     /// bundle, which is fine here: this exercises the persistence and recovery path,
     /// which is driven by the recorder rather than by sensors.
-    private func makeCoordinator() -> DriveSessionCoordinator {
+    private func makeCoordinator(telemetryStore: TelemetryWriting = TelemetryFileStore.shared)
+    -> DriveSessionCoordinator {
         let coordinator = DriveSessionCoordinator(store: store,
                                                   obd: OBDConnectionManager(),
                                                   location: LocationService(),
                                                   motion: MotionService(),
                                                   settings: settings,
                                                   weather: MockWeatherProvider(scenario: .clear),
-                                                  route: UnavailableRouteProvider())
+                                                  route: UnavailableRouteProvider(),
+                                                  telemetryStore: telemetryStore)
         coordinator.select(vehicle: vehicle)
         return coordinator
+    }
+
+    /// Records what it was asked to do, and can be told to fail.
+    ///
+    /// The reason the coordinator takes a `TelemetryWriting` at all: the path worth
+    /// testing is the one where the disk says no, and the real store on a healthy
+    /// simulator never does.
+    private final class SpyTelemetryStore: TelemetryWriting, @unchecked Sendable {
+        var succeeds = true
+        var appendedSampleCounts: [Int] = []
+        var finalisedTripIDs: [UUID] = []
+        var discardedTripIDs: [UUID] = []
+
+        func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) -> Bool {
+            appendedSampleCounts.append(samples.count)
+            return succeeds
+        }
+
+        func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample]) -> Bool {
+            finalisedTripIDs.append(tripID)
+            return succeeds
+        }
+
+        func discardJournal(vehicleID: UUID, tripID: UUID) {
+            discardedTripIDs.append(tripID)
+        }
+    }
+
+    // MARK: - Telemetry write seam
+
+    /// Discarding a drive has to reach the journal through the injected store rather than
+    /// the singleton, or the confirmed-write path is not actually in use.
+    func testDiscardingADriveGoesThroughTheInjectedTelemetryStore() throws {
+        let spy = SpyTelemetryStore()
+        let coordinator = makeCoordinator(telemetryStore: spy)
+        coordinator.startDriveManually()
+        let tripID = try XCTUnwrap(coordinator.currentTrip?.id)
+
+        coordinator.abandonActiveDrive()
+
+        XCTAssertEqual(spy.discardedTripIDs, [tripID],
+                       "the abandoned drive's journal was discarded through the seam")
+    }
+
+    func testAFreshCoordinatorHasNothingPendingOnDisk() {
+        let coordinator = makeCoordinator(telemetryStore: SpyTelemetryStore())
+        XCTAssertEqual(coordinator.pendingTelemetryCount, 0)
+        XCTAssertEqual(coordinator.droppedTelemetrySamples, 0)
     }
 
     // MARK: - Checkpointing

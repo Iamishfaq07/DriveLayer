@@ -36,6 +36,7 @@ final class DriveSessionCoordinator {
     var profile: VehicleProfile?
 
     private let store: GarageStore
+    private let telemetryStore: TelemetryWriting
     private let obd: OBDConnectionManager
     private let location: LocationService
     private let motion: MotionService
@@ -51,6 +52,18 @@ final class DriveSessionCoordinator {
     private let insightEngine = InsightEngine()
     private var downsampler = TelemetryDownsampler()
     private var pendingSamples: [TelemetrySample] = []
+    /// Samples retained because a write failed, capped so a disk that keeps refusing
+    /// cannot grow this without limit. Five thousand is roughly eighty minutes at 1 Hz.
+    private static let maximumPendingSamples = 5_000
+    private var telemetryWriteFailures = 0
+    private(set) var droppedTelemetrySamples = 0
+
+    /// Live telemetry not yet on disk.
+    ///
+    /// The Debug Center shows this because it is exactly the amount at risk if iOS
+    /// terminates the app in the next moment, and because a number that stops falling is
+    /// how a failing write announces itself.
+    var pendingTelemetryCount: Int { pendingSamples.count }
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
 
@@ -98,8 +111,10 @@ final class DriveSessionCoordinator {
          motion: MotionService,
          settings: AppSettings,
          weather: WeatherProviding,
-         route: RouteProviding) {
+         route: RouteProviding,
+         telemetryStore: TelemetryWriting = TelemetryFileStore.shared) {
         self.store = store
+        self.telemetryStore = telemetryStore
         self.obd = obd
         self.location = location
         self.motion = motion
@@ -155,10 +170,10 @@ final class DriveSessionCoordinator {
             if let recovered = TripRecovery.finalise(open, lastKnownActivityAt: lastActivity) {
                 store.save(trip: recovered)
                 // The drive's chunks outlived the process that was writing them.
-                TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: recovered.id)
+                telemetryStore.finalise(vehicleID: vehicle.id, tripID: recovered.id, appending: [])
             } else {
                 store.delete(tripID: open.id)
-                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: open.id)
+                telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: open.id)
             }
         }
     }
@@ -212,7 +227,7 @@ final class DriveSessionCoordinator {
         pendingSamples.removeAll()
         recorder = vehicle.map { makeRecorder(for: $0) }
         if let vehicle {
-            TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
+            telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
         }
         LiveActivityController.shared.end()
     }
@@ -248,6 +263,10 @@ final class DriveSessionCoordinator {
         if lastAdapterConnected != adapterConnected {
             if lastAdapterConnected != nil {
                 recorder.noteAdapterConnectionChange(connected: adapterConnected, at: now)
+                // The stream either just stopped or just resumed. Either way this is a
+                // natural boundary and a cheap moment to get what we have onto disk,
+                // rather than waiting out the rest of the interval.
+                checkpoint(force: true, now: now)
             }
             lastAdapterConnected = adapterConnected
         }
@@ -390,7 +409,7 @@ final class DriveSessionCoordinator {
             // next launch would "recover" a drive the recorder deliberately threw away.
             store.delete(tripID: discardedID)
             if let vehicle {
-                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
+                telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
             }
             pendingSamples.removeAll()
             motion.clearImpacts()
@@ -452,19 +471,45 @@ final class DriveSessionCoordinator {
         lastCheckpointAt = now
         store.save(trip: trip)
         guard let vehicle, !pendingSamples.isEmpty else { return }
-        TelemetryFileStore.shared.appendChunk(samples: pendingSamples,
-                                             vehicleID: vehicle.id,
-                                             tripID: trip.id)
+        // Cleared only once the samples are actually on disk. The buffer used to be
+        // emptied on the line after a fire-and-forget `queue.async`, which meant a failed
+        // write -- or termination before the queued block ran -- lost them silently.
+        guard telemetryStore.appendChunk(samples: pendingSamples,
+                                         vehicleID: vehicle.id,
+                                         tripID: trip.id) else {
+            telemetryWriteFailures += 1
+            capPendingSamples()
+            return
+        }
+        telemetryWriteFailures = 0
         pendingSamples.removeAll()
+    }
+
+    /// Drops the oldest retained samples once the buffer passes its cap.
+    ///
+    /// Reached only when writes keep failing, where the choice is between losing the
+    /// oldest telemetry and growing until the app is killed for it. Counted rather than
+    /// silent, so the Debug Center can say it happened.
+    private func capPendingSamples() {
+        let excess = pendingSamples.count - Self.maximumPendingSamples
+        guard excess > 0 else { return }
+        pendingSamples.removeFirst(excess)
+        droppedTelemetrySamples += excess
     }
 
     /// Compacts a finished drive's chunks into its single file.
     private func flushTelemetry(for trip: Trip) {
         guard let vehicle else { return }
-        TelemetryFileStore.shared.finalise(vehicleID: vehicle.id,
-                                           tripID: trip.id,
-                                           appending: pendingSamples)
-        pendingSamples.removeAll()
+        if telemetryStore.finalise(vehicleID: vehicle.id,
+                                   tripID: trip.id,
+                                   appending: pendingSamples) {
+            pendingSamples.removeAll()
+        } else {
+            // Kept for the next attempt. A drive whose compaction failed is still
+            // recoverable from its chunks at the next launch.
+            telemetryWriteFailures += 1
+            capPendingSamples()
+        }
         flushPending()
         reloadBaselines()
     }

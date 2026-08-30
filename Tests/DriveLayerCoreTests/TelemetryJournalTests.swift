@@ -65,6 +65,29 @@ final class TelemetryJournalTests: XCTestCase {
         XCTAssertTrue(journal.interruptedTrips().isEmpty)
     }
 
+    // MARK: - Reporting failure
+
+    /// The coordinator now clears its buffer only when this returns true, so the return
+    /// value has to mean something. It used to be discarded across a queue hop.
+    func testAppendReportsSuccess() {
+        XCTAssertTrue(journal.appendChunk(samples(count: 5), vehicleID: vehicleID, tripID: tripID))
+    }
+
+    func testAppendReportsFailureRatherThanPretendingItWrote() throws {
+        // A journal rooted at a path that cannot hold a directory: the file below stands
+        // where the journal tree would have to go.
+        let blocked = root.appendingPathComponent("blocked", isDirectory: false)
+        try Data("not a directory".utf8).write(to: blocked)
+
+        let refusing = TelemetryJournal(root: blocked)
+        XCTAssertFalse(refusing.appendChunk(samples(count: 5), vehicleID: vehicleID, tripID: tripID),
+                       "a write that did not happen must not report success")
+    }
+
+    func testAnEmptyFlushIsNotReportedAsAWrite() {
+        XCTAssertFalse(journal.appendChunk([], vehicleID: vehicleID, tripID: tripID))
+    }
+
     // MARK: - Chunk naming
 
     /// Names used to come from the file *count*, so a gap in the sequence made the next

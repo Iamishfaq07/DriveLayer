@@ -34,6 +34,20 @@ private enum ProtectedDirectory {
 /// Telemetry is regenerable-ish bulk data: it is excluded from backup so a driver's
 /// iCloud backup does not carry hundreds of megabytes of engine samples, and it is
 /// written with file protection so it is unreadable while the device is locked.
+/// The telemetry write surface the drive coordinator depends on.
+///
+/// A protocol rather than the singleton because the interesting path is the one that
+/// fails. Samples have to survive a write that did not happen, and a test that can only
+/// ever succeed cannot demonstrate that they do.
+protocol TelemetryWriting: Sendable {
+    /// True only once the samples are on disk. See the note on the implementation.
+    func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) -> Bool
+    func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample]) -> Bool
+    func discardJournal(vehicleID: UUID, tripID: UUID)
+}
+
+extension TelemetryFileStore: TelemetryWriting {}
+
 final class TelemetryFileStore: @unchecked Sendable {
 
     static let shared = TelemetryFileStore()
@@ -51,21 +65,32 @@ final class TelemetryFileStore: @unchecked Sendable {
         .map { TelemetryJournal(root: $0) }
 
     /// Writes a drive's telemetry in one go, for callers holding all of it in memory.
-    func write(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) {
-        guard let journal else { return }
-        queue.async { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: samples) }
+    @discardableResult
+    func write(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) -> Bool {
+        guard let journal else { return false }
+        return queue.sync { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: samples) }
     }
 
     /// Appends a chunk for a drive that is still going. See `TelemetryJournal`.
-    func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) {
-        guard let journal else { return }
-        queue.async { journal.appendChunk(samples, vehicleID: vehicleID, tripID: tripID) }
+    ///
+    /// Synchronous, and the result is the point of it. This used to be `queue.async` with
+    /// the journal's `Bool` discarded, and the caller cleared its buffer on the next line
+    /// -- so a failed write, or the app being terminated before the queued block ran, lost
+    /// the samples with no copy anywhere. `queue.sync` is what `read` and
+    /// `interruptedTrips` already do, and a chunk is one small encode plus one atomic
+    /// write, so the main thread is held for a trivial period once every twenty seconds.
+    /// Losing telemetry is the worse trade.
+    @discardableResult
+    func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) -> Bool {
+        guard let journal else { return false }
+        return queue.sync { journal.appendChunk(samples, vehicleID: vehicleID, tripID: tripID) }
     }
 
     /// Compacts a finished drive's chunks, plus anything still in memory.
-    func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample] = []) {
-        guard let journal else { return }
-        queue.async { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: trailing) }
+    @discardableResult
+    func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample] = []) -> Bool {
+        guard let journal else { return false }
+        return queue.sync { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: trailing) }
     }
 
     func discardJournal(vehicleID: UUID, tripID: UUID) {
