@@ -86,6 +86,17 @@ final class HeatSoakAnalyserTests: XCTestCase {
         XCTAssertEqual(assessment.deltaC.value, 8)
     }
 
+    func testTheNormalCopyDoesNotClaimAirflowWhileStationary() {
+        XCTAssertTrue(assess(intake: 38, ambient: 30, speedKmh: 60).detail
+            .contains("air moving through the engine bay"))
+
+        // The same benign reading, sitting still. The explanation no longer applies, so
+        // it is dropped rather than asserted anyway.
+        let stopped = assess(intake: 38, ambient: 30, speedKmh: 0).detail
+        XCTAssertFalse(stopped.contains("air moving"))
+        XCTAssertTrue(stopped.hasSuffix("which is what it should be."))
+    }
+
     func testSustainedRiseWithNoAirflowIsHeatSoak() {
         let assessment = assess(intake: 68, ambient: 32, speedKmh: 4, idleSeconds: 600)
         XCTAssertEqual(assessment.phase, .soaking)

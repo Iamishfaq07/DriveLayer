@@ -146,8 +146,12 @@ enum HeatSoakAnalyser {
         let amount = String(format: "%.0f °C", delta)
         switch phase {
         case .normal:
-            return "Intake air is within \(amount) of the air outside, which is what it "
-                 + "should be with air moving through the engine bay."
+            // The reason is only offered when it is actually the reason. Sitting still
+            // with a cool intake is equally normal, and telling a stationary driver that
+            // air is moving through their engine bay is a small lie that costs trust.
+            let text = "Intake air is within \(amount) of the air outside, which is what "
+            return hasAirflow ? text + "it should be with air moving through the engine bay."
+                              : text + "it should be."
         case .soaking:
             var text = "Intake air is about \(amount) hotter than the air outside"
             if let idleSeconds, idleSeconds > 120 {
