@@ -179,7 +179,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 257 tests passing in CI. |
+| **Test execution** | 418 tests passing in CI at `062386e`: 397 via `swift test`, 21 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
