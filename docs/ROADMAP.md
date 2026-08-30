@@ -190,6 +190,7 @@ Honest list of what is scaffolding rather than working software.
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe, the last-drive widget included — it links to "my last drive" rather than an identifier, so the app resolves which drive that is as it opens. |
 | **Accessibility on device** | Contrast is enforced by tests and every metric has a spoken label, but nothing has been driven with VoiceOver or at the largest text sizes on real hardware. |
 | **Other vehicles** | Deliberately not offered. The catalog, the profile system and per-vehicle isolation are all built and tested; `SupportedVehicles.offeredProfileIDs` lists the one car a driver may pick, because it is the only one anything has been checked against. |
+| **Driver-reported hazards** | Unreachable. `RoadConditionProviding` and `LocalRoadReportStore` in `RoadIntelligence/RoadReports.swift` are referenced from nowhere — not the app, not the widgets, not even a test. Either wire them or delete them; leaving them reads as a feature that exists. |
 | **Watch app** | Not started. |
 
 ## Harrier brief
