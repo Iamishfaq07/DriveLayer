@@ -21,6 +21,12 @@ final class DriveSessionCoordinator {
     private(set) var health: VehicleHealthReport?
     private(set) var fuelStatus: FuelStatus = .unknown
     private(set) var dieselAssessment: DieselUsageAssessment?
+    /// What DriveLayer makes of the Hyperion engine right now.
+    ///
+    /// The analysers behind this were written and wired to nothing: EngineThermalModel
+    /// and HeatSoakAnalyser were tested and reachable from no production code at all.
+    /// This property is the seam that gets them to a driver.
+    private(set) var hyperion: HyperionAssessment = .unavailable
     private(set) var gradient: GradientEstimate?
     private(set) var terrainFeature: TerrainFeature?
     private(set) var currentWeather: WeatherSnapshot?
@@ -73,6 +79,10 @@ final class DriveSessionCoordinator {
 
     /// Last adapter state the loop saw, so a change can be recorded on the drive.
     private var lastAdapterConnected: Bool?
+
+    /// Highest intake-over-ambient difference seen recently, so a fall can be reported as
+    /// cooling rather than as a smaller number. Decays rather than latching.
+    private var peakIntakeDeltaC: Double?
 
     private var driveLoop: Task<Void, Never>?
     /// When the live drive was last written to disk. See `checkpoint(force:now:)`.
@@ -433,6 +443,52 @@ final class DriveSessionCoordinator {
 
     // MARK: - Telemetry and baselines
 
+    /// A telemetry reading as a `Provenanced` value, or unavailable when it is missing,
+    /// stale, or there is no adapter.
+    ///
+    /// The provenance is carried through rather than assumed, which is what keeps a
+    /// simulated reading from arriving at the Hyperion screen looking measured.
+    private func provenancedReading(_ metric: VehicleMetric,
+                                    freshWithin seconds: TimeInterval,
+                                    now: Date) -> Provenanced<Double> {
+        guard obd.isConnected,
+              let entry = obd.telemetry.entry(metric),
+              now.timeIntervalSince(entry.timestamp) <= seconds else { return .unavailable() }
+        return Provenanced(value: entry.value,
+                           provenance: entry.provenance,
+                           timestamp: entry.timestamp)
+    }
+
+    private func assessHyperion(profile: VehicleProfile?, now: Date) -> HyperionAssessment {
+        guard obd.isConnected else {
+            peakIntakeDeltaC = nil
+            return .unavailable
+        }
+
+        let intake = provenancedReading(.intakeAirTemperatureC, freshWithin: 30, now: now)
+        let ambient = obd.telemetry.value(.ambientAirTemperatureC, freshWithin: 300, now: now)
+        if let intakeValue = intake.value, let ambient {
+            peakIntakeDeltaC = HeatSoakAnalyser.updatedPeak(current: peakIntakeDeltaC,
+                                                           delta: intakeValue - ambient)
+        }
+
+        return HyperionGuardian.assess(
+            coolantC: provenancedReading(.coolantTemperatureC, freshWithin: 60, now: now),
+            oilC: provenancedReading(.oilTemperatureC, freshWithin: 60, now: now),
+            intakeC: intake,
+            ambientC: ambient,
+            speedKmh: obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
+            idleSeconds: currentTrip?.idleDurationSeconds,
+            runtimeSeconds: currentTrip.map { now.timeIntervalSince($0.startedAt) },
+            peakIntakeDeltaC: peakIntakeDeltaC,
+            // Warm-up history is not stored per drive yet; that is its own P1 item, and
+            // passing an empty history simply means no comparison is offered rather than
+            // a comparison being invented.
+            warmUpHistory: [],
+            intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
+            profile: profile)
+    }
+
     private func collectTelemetry(_ telemetry: VehicleTelemetry, at now: Date) {
         if let sample = downsampler.consider(telemetry, at: now) {
             pendingSamples.append(sample)
@@ -560,6 +616,7 @@ final class DriveSessionCoordinator {
                                              tankCapacityLitres: vehicle.tankCapacityLitres(profile: profile),
                                              economy: economy)
         dieselAssessment = DieselGuardian.assess(trips: recentTrips, profile: profile, now: now)
+        hyperion = assessHyperion(profile: profile, now: now)
 
         let context = InsightContext(now: now,
                                      vehicle: vehicle,
