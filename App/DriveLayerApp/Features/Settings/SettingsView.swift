@@ -33,6 +33,25 @@ struct SettingsView: View {
                 Text("Automatic recording needs background location, and iOS will ask you for it. Without it, drives can still be started from the Drive tab.")
             }
 
+            Section {
+                Toggle("Remind me about expiry and service", isOn: $settings.remindersEnabled)
+                    .onChange(of: settings.remindersEnabled) { _, isOn in
+                        Task {
+                            if isOn { await environment.reminders.requestAuthorisation() }
+                            environment.drive.refreshAnalysis(force: true)
+                        }
+                    }
+                if settings.remindersEnabled, environment.reminders.authorisation == .denied {
+                    Text("Notifications are turned off for DriveLayer in iOS Settings, so reminders can't be delivered.")
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.watch)
+                }
+            } header: {
+                Text("Reminders")
+            } footer: {
+                Text("DriveLayer reminds you 30 days, 7 days and on the day before a document expires, and a week before a dated service is due. Reminders never include a policy or registration number — a lock-screen banner is visible to whoever is holding the phone.")
+            }
+
             Section("Connection") {
                 NavigationLink(destination: AdapterSetupView()) {
                     HStack {

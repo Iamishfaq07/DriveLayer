@@ -18,6 +18,7 @@ final class AppEnvironment {
     let motion: MotionService
     let drive: DriveSessionCoordinator
     let scanner: BluetoothAdapterScanner
+    let reminders: ReminderScheduler
 
     private(set) var vehicles: [Vehicle] = []
     private(set) var selectedVehicleID: UUID?
@@ -35,12 +36,14 @@ final class AppEnvironment {
         self.location = LocationService()
         self.motion = MotionService()
         self.scanner = BluetoothAdapterScanner()
+        self.reminders = ReminderScheduler()
         self.drive = DriveSessionCoordinator(store: store,
                                              obd: obd,
                                              location: location,
                                              motion: motion,
                                              settings: settings,
                                              weather: AppEnvironment.makeWeatherProvider(settings: settings))
+        self.drive.reminders = reminders
         AppEnvironment.active = self
     }
 
@@ -63,6 +66,7 @@ final class AppEnvironment {
     func bootstrap() async {
         reloadVehicles()
         drive.start()
+        await reminders.refreshAuthorisation()
         await connectIfPossible()
     }
 

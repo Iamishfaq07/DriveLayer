@@ -57,7 +57,11 @@ final class LiveActivityController {
         #endif
     }
 
-    func update(trip: Trip?, insight: DriveInsight?, health: SemanticStatus?, settings: AppSettings) {
+    func update(trip: Trip?,
+                insight: DriveInsight?,
+                health: SemanticStatus?,
+                estimatedRangeKm: Double?,
+                settings: AppSettings) {
         #if canImport(ActivityKit)
         guard settings.liveActivitiesEnabled, let activity, let trip else { return }
         let snapshot = ActivityStateSnapshot(distanceKm: (trip.distanceKm * 10).rounded() / 10,
@@ -77,7 +81,7 @@ final class LiveActivityController {
                                                          vehicleStatusRawValue: (health ?? .unknown).rawValue,
                                                          headline: insight?.title,
                                                          headlineDetail: insight?.summary,
-                                                         estimatedRangeKm: nil)
+                                                         estimatedRangeKm: estimatedRangeKm)
         Task {
             await activity.update(ActivityContent(state: state, staleDate: now.addingTimeInterval(300)))
         }

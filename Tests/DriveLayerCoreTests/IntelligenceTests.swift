@@ -353,3 +353,113 @@ final class DieselGuardianTests: XCTestCase {
         XCTAssertNil(capability.validatedRequest)
     }
 }
+
+final class ReminderPlannerTests: XCTestCase {
+
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+    private let calendar = Calendar(identifier: .gregorian)
+    private let vehicleID = UUID()
+
+    private func document(kind: DocumentKind, expiresInDays: Int?) -> DocumentRecord {
+        DocumentRecord(vehicleID: vehicleID,
+                       kind: kind,
+                       referenceNumber: "POL9876543210",
+                       expiryDate: expiresInDays.flatMap { calendar.date(byAdding: .day, value: $0, to: now) })
+    }
+
+    func testSchedulesTheFullLadderBeforeExpiry() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .insurance, expiresInDays: 90)],
+                                                          now: now, calendar: calendar)
+        XCTAssertEqual(reminders.count, 3, "30 days, 7 days, and the day itself")
+        XCTAssertEqual(Set(reminders.map(\.kind)), [.documentExpiry, .documentExpired])
+        XCTAssertTrue(reminders.allSatisfy { $0.fireDate > now })
+    }
+
+    func testDropsLeadTimesThatHaveAlreadyPassed() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .insurance, expiresInDays: 10)],
+                                                          now: now, calendar: calendar)
+        // The 30-day lead is in the past; only the 7-day and the day itself remain.
+        XCTAssertEqual(reminders.count, 2)
+        XCTAssertTrue(reminders.allSatisfy { $0.fireDate > now })
+    }
+
+    func testAlreadyExpiredDocumentSchedulesNothing() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .insurance, expiresInDays: -5)],
+                                                          now: now, calendar: calendar)
+        XCTAssertTrue(reminders.isEmpty, "a reminder that would fire in the past is noise")
+    }
+
+    func testDocumentsThatDoNotExpireAreIgnored() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .serviceInvoice, expiresInDays: 40)],
+                                                          now: now, calendar: calendar)
+        XCTAssertTrue(reminders.isEmpty)
+    }
+
+    func testDocumentWithoutAnExpiryDateIsIgnored() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .insurance, expiresInDays: nil)],
+                                                          now: now, calendar: calendar)
+        XCTAssertTrue(reminders.isEmpty)
+    }
+
+    func testReminderCopyNeverLeaksTheReferenceNumber() {
+        let reminders = ReminderPlanner.documentReminders([document(kind: .insurance, expiresInDays: 90)],
+                                                          now: now, calendar: calendar)
+        for reminder in reminders {
+            XCTAssertFalse(reminder.body.contains("POL9876543210"),
+                           "a lock-screen banner is visible to whoever holds the phone")
+            XCTAssertFalse(reminder.title.contains("POL9876543210"))
+        }
+    }
+
+    func testIdentifiersAreStableSoReschedulingReplaces() {
+        let record = document(kind: .insurance, expiresInDays: 90)
+        let first = ReminderPlanner.documentReminders([record], now: now, calendar: calendar)
+        let second = ReminderPlanner.documentReminders([record],
+                                                       now: now.addingTimeInterval(3_600),
+                                                       calendar: calendar)
+        XCTAssertEqual(Set(first.map(\.id)), Set(second.map(\.id)))
+    }
+
+    // MARK: - Maintenance
+
+    private func dueStatus(remainingDays: Int?, remainingKm: Double?) -> MaintenanceDueStatus {
+        let item = MaintenanceItem(vehicleID: vehicleID, kind: .periodicService,
+                                   intervalDistanceKm: remainingKm == nil ? nil : 15_000,
+                                   intervalMonths: remainingDays == nil ? nil : 12,
+                                   lastDoneDate: remainingDays == nil ? nil : now,
+                                   lastDoneOdometerKm: remainingKm == nil ? nil : 30_000)
+        return MaintenanceDueStatus(item: item,
+                                    remainingKm: remainingKm,
+                                    remainingDays: remainingDays,
+                                    status: (remainingDays ?? 1) < 0 ? .attention : .watch)
+    }
+
+    func testDistanceOnlyItemsScheduleNothing() {
+        let reminders = ReminderPlanner.maintenanceReminders([dueStatus(remainingDays: nil, remainingKm: 400)],
+                                                             now: now, calendar: calendar)
+        XCTAssertTrue(reminders.isEmpty,
+                      "there is no date to fire on, and DriveLayer will not invent one")
+    }
+
+    func testDatedItemSchedulesAheadOfTheDueDate() throws {
+        let reminders = ReminderPlanner.maintenanceReminders([dueStatus(remainingDays: 30, remainingKm: nil)],
+                                                             now: now, calendar: calendar)
+        let reminder = try XCTUnwrap(reminders.first)
+        XCTAssertEqual(reminder.kind, .maintenanceDue)
+        let daysAhead = calendar.dateComponents([.day], from: now, to: reminder.fireDate).day ?? 0
+        XCTAssertTrue((22...24).contains(daysAhead), "a week before it is due, got \(daysAhead)")
+    }
+
+    func testOverdueItemGetsOneNudgeNotADailyDrumbeat() {
+        let reminders = ReminderPlanner.maintenanceReminders([dueStatus(remainingDays: -12, remainingKm: nil)],
+                                                             now: now, calendar: calendar)
+        XCTAssertEqual(reminders.count, 1)
+        XCTAssertEqual(reminders.first?.kind, .maintenanceOverdue)
+    }
+
+    func testDistantItemsAreNotScheduledYet() {
+        let reminders = ReminderPlanner.maintenanceReminders([dueStatus(remainingDays: 300, remainingKm: nil)],
+                                                             now: now, calendar: calendar)
+        XCTAssertTrue(reminders.isEmpty)
+    }
+}

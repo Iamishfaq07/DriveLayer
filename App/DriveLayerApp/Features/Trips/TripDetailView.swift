@@ -29,6 +29,7 @@ struct TripDetailView: View {
             efficiencySection
             vehicleSection
             terrainSection
+            weatherSection
             eventsSection
         }
         .navigationTitle(formatter.mediumDate(trip.startedAt) ?? "Drive")
@@ -122,6 +123,25 @@ struct TripDetailView: View {
                                      unit: "m",
                                      provenance: .estimated)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var weatherSection: some View {
+        if let weather = trip.weather {
+            Section("Weather") {
+                ValueOrReasonRow(label: "Conditions", value: weather.conditionDescription)
+                ValueOrReasonRow(label: "Temperature",
+                                 value: formatter.temperature(celsius: weather.temperatureC),
+                                 unit: formatter.temperatureUnitLabel)
+                ValueOrReasonRow(label: "Visibility",
+                                 value: weather.visibilityMetres.map { String(Int($0.rounded())) },
+                                 unit: "m",
+                                 reason: "Not recorded")
+                Text("Recorded during the drive, not looked up afterwards.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
             }
         }
     }

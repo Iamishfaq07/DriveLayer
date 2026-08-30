@@ -19,6 +19,7 @@ final class AppSettings {
         self.automaticTripDetection = defaults.bool(forKey: Key.automaticTripDetection)
         self.liveActivitiesEnabled = defaults.object(forKey: Key.liveActivities) as? Bool ?? true
         self.roadImpactDetectionEnabled = defaults.bool(forKey: Key.roadImpactDetection)
+        self.remindersEnabled = defaults.bool(forKey: Key.reminders)
         self.telemetryRetentionDays = defaults.object(forKey: Key.telemetryRetentionDays) as? Int ?? 180
         self.useSimulator = defaults.bool(forKey: Key.useSimulator)
         self.simulatorScenario = OBDScenarioID(rawValue: defaults.string(forKey: Key.simulatorScenario) ?? "") ?? .normalHighway
@@ -33,6 +34,7 @@ final class AppSettings {
         static let automaticTripDetection = "settings.automaticTripDetection"
         static let liveActivities = "settings.liveActivities"
         static let roadImpactDetection = "settings.roadImpactDetection"
+        static let reminders = "settings.reminders"
         static let telemetryRetentionDays = "settings.telemetryRetentionDays"
         static let useSimulator = "settings.useSimulator"
         static let simulatorScenario = "settings.simulatorScenario"
@@ -46,6 +48,7 @@ final class AppSettings {
     var automaticTripDetection: Bool { didSet { defaults.set(automaticTripDetection, forKey: Key.automaticTripDetection) } }
     var liveActivitiesEnabled: Bool { didSet { defaults.set(liveActivitiesEnabled, forKey: Key.liveActivities) } }
     var roadImpactDetectionEnabled: Bool { didSet { defaults.set(roadImpactDetectionEnabled, forKey: Key.roadImpactDetection) } }
+    var remindersEnabled: Bool { didSet { defaults.set(remindersEnabled, forKey: Key.reminders) } }
     var telemetryRetentionDays: Int { didSet { defaults.set(telemetryRetentionDays, forKey: Key.telemetryRetentionDays) } }
     var useSimulator: Bool { didSet { defaults.set(useSimulator, forKey: Key.useSimulator) } }
     var simulatorScenario: OBDScenarioID { didSet { defaults.set(simulatorScenario.rawValue, forKey: Key.simulatorScenario) } }

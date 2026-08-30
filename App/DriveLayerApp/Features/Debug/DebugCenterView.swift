@@ -11,6 +11,7 @@ struct DebugCenterView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var simulatorState: SimulatedVehicleState?
     @State private var unsupported: [OBDPID] = []
+    @State private var pendingReminders: [String] = []
 
     var body: some View {
         List {
@@ -20,6 +21,7 @@ struct DebugCenterView: View {
             liveValuesSection
             insightSection
             baselineSection
+            remindersSection
             issuesSection
             storageSection
         }
@@ -192,6 +194,20 @@ struct DebugCenterView: View {
         }
     }
 
+    private var remindersSection: some View {
+        Section("Scheduled reminders") {
+            LabeledContent("Permission", value: environment.reminders.authorisation.rawValue)
+            LabeledContent("Scheduled", value: "\(environment.reminders.scheduledCount)")
+            if pendingReminders.isEmpty {
+                Text("Nothing queued.").font(DL.Font.callout).foregroundStyle(DLColor.secondaryText)
+            } else {
+                ForEach(pendingReminders, id: \.self) { summary in
+                    Text(summary).font(DL.Font.caption).foregroundStyle(DLColor.secondaryText)
+                }
+            }
+        }
+    }
+
     private var issuesSection: some View {
         Section("Recent issues") {
             if environment.obd.recentIssues.isEmpty {
@@ -217,6 +233,7 @@ struct DebugCenterView: View {
 
     private func refresh() async {
         unsupported = await environment.obd.unsupportedPIDs()
+        pendingReminders = await environment.reminders.pendingSummaries()
         simulatorState = nil
     }
 }

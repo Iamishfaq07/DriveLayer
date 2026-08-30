@@ -38,6 +38,9 @@ final class DriveSessionCoordinator {
     private let motion: MotionService
     private let settings: AppSettings
     private var weather: WeatherProviding
+    /// Set by `AppEnvironment` after construction; reminders are a side effect of
+    /// analysis rather than something the coordinator needs to own.
+    weak var reminders: ReminderScheduler?
 
     private var recorder: TripRecorder?
     private var gradientCalculator = GradientCalculator()
@@ -197,9 +200,18 @@ final class DriveSessionCoordinator {
         case let .ended(trip):
             isRecording = false
             currentTrip = nil
-            store.save(trip: trip)
-            flushTelemetry(for: trip)
-            updateOdometer(after: trip)
+            // Weather is captured with the drive rather than looked up later: what it
+            // was like at the time is a fact, and a lookup next week is a guess.
+            var finished = trip
+            finished.weather = currentWeather.map { snapshot in
+                TripWeatherSummary(temperatureC: snapshot.temperatureC,
+                                   conditionDescription: snapshot.condition.displayName,
+                                   precipitationIntensityMillimetresPerHour: snapshot.precipitationIntensityMillimetresPerHour,
+                                   visibilityMetres: snapshot.visibilityMetres)
+            }
+            store.save(trip: finished)
+            flushTelemetry(for: finished)
+            updateOdometer(after: finished)
             location.start(fidelity: .idle)
             LiveActivityController.shared.end()
             refreshAnalysis(force: true)
@@ -323,7 +335,18 @@ final class DriveSessionCoordinator {
         LiveActivityController.shared.update(trip: currentTrip,
                                              insight: InsightEngine.headline(insights),
                                              health: health?.overall,
+                                             estimatedRangeKm: fuelStatus.estimatedRangeKm.value,
                                              settings: settings)
+
+        // Rescheduling is idempotent, so running it on every analysis pass keeps
+        // reminders in step with edits without ever duplicating one.
+        let documents = store.documents(vehicleID: vehicle.id)
+        let remindersEnabled = settings.remindersEnabled
+        Task { [weak reminders] in
+            await reminders?.reschedule(documents: documents,
+                                        maintenance: maintenance,
+                                        isEnabled: remindersEnabled)
+        }
     }
 
     /// Builds the copilot's snapshot from the same context the insights came from.
