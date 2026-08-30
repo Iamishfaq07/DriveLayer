@@ -199,5 +199,11 @@ saying "Range: 326 km, estimated" rather than four separate swipes, so the quali
 can never be detached from the number it qualifies. A system row speaks its status.
 An insight card is one utterance. Decorative symbols are hidden.
 
+One deliberate exception: the widgets use the system's own status colours rather
+than this palette. A widget draws on a container background the app does not own,
+and the tinted and accented rendering modes replace its colours outright, so the
+tested guarantee would not transfer. The distinct symbol per status carries the
+meaning there, as everywhere else.
+
 None of this has been verified with VoiceOver on a device — that needs hardware, and
 it is on the list.
