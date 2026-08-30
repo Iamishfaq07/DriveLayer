@@ -35,6 +35,22 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
     private var isReady = false
     private var requestCounter: UInt64 = 0
 
+    /// The link dropped without us asking for it.
+    ///
+    /// Sticky, and that is the entire point. `didDisconnectPeripheral` can only fail a
+    /// request that is in flight, and the poll loop sleeps 250 ms between reads -- so the
+    /// ordinary drop happens with nothing pending, both continuations are nil, the handler
+    /// is a no-op, and the only trace left behind was `isReady = false`. The next `send`
+    /// then reported `.notConnected`, which is indistinguishable from never having
+    /// connected at all, while the one reconnect trigger upstream is gated on
+    /// `.connectionLost`. The supervised reconnect existed and was unreachable for the
+    /// disconnect that actually happens in a moving car.
+    private var didLoseConnection = false
+
+    /// Set while we are the ones hanging up, so a deliberate disconnect is not mistaken
+    /// for a drop and does not send the supervisor chasing it.
+    private var isDisconnectingIntentionally = false
+
     private struct PendingRequest {
         let id: UInt64
         let continuation: CheckedContinuation<String, Error>
@@ -59,6 +75,8 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
                     return
                 }
                 self.pendingConnection = continuation
+                self.didLoseConnection = false
+                self.isDisconnectingIntentionally = false
                 if self.central == nil {
                     self.central = CBCentralManager(delegate: self, queue: self.queue)
                 } else {
@@ -78,6 +96,8 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
     func disconnect() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
+                self.isDisconnectingIntentionally = true
+                self.didLoseConnection = false
                 self.failPendingRequest(with: .connectionLost)
                 if let peripheral = self.peripheral {
                     self.central?.cancelPeripheralConnection(peripheral)
@@ -98,7 +118,12 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
                 guard self.isReady,
                       let peripheral = self.peripheral,
                       let characteristic = self.writeCharacteristic else {
-                    continuation.resume(throwing: OBDError.notConnected)
+                    // `.notConnected` is reserved for never having had a link. Reporting it
+                    // for a link that dropped is what stopped the reconnect supervisor
+                    // being reached.
+                    continuation.resume(throwing: self.didLoseConnection
+                                        ? OBDError.connectionLost
+                                        : OBDError.notConnected)
                     return
                 }
                 guard self.pendingRequest == nil else {
@@ -175,13 +200,30 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
                 writeCharacteristic = characteristic
             }
         }
-        if writeCharacteristic != nil && notifyCharacteristic != nil && !isReady {
-            isReady = true
-            completeConnection(.success(()))
-        }
+        // Readiness is deliberately not declared here. `setNotifyValue` only *asks* for
+        // the subscription; CoreBluetooth confirms it separately, and a command written
+        // before that confirmation gets its reply as a notification iOS is not yet
+        // delivering -- a silent stall until the request times out, which is precisely how
+        // slower clones lost their first response.
+        completeReadinessIfPossible()
     }
 
-    private static func looksLikeAdapter(name: String?, advertisement: [String: Any]) -> Bool {
+    /// Declares the transport ready once there is somewhere to write and the notify
+    /// subscription is confirmed live.
+    private func completeReadinessIfPossible() {
+        guard !isReady,
+              writeCharacteristic != nil,
+              let notify = notifyCharacteristic,
+              notify.isNotifying else { return }
+        isReady = true
+        completeConnection(.success(()))
+    }
+
+    /// Whether an advertisement looks like an OBD adapter.
+    ///
+    /// Was private to this type, so the pairing screen -- a different type entirely -- had
+    /// no way to reach it and listed every advertising peripheral in range instead.
+    static func looksLikeAdapter(name: String?, advertisement: [String: Any]) -> Bool {
         let localName = (advertisement[CBAdvertisementDataLocalNameKey] as? String) ?? name ?? ""
         let upper = localName.uppercased()
         let hints = ["OBD", "ELM", "VLINK", "VGATE", "VEEPEAK", "KONNWEI", "ICAR", "OBDLINK", "CARISTA"]
@@ -235,6 +277,9 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
         isReady = false
         writeCharacteristic = nil
         notifyCharacteristic = nil
+        // Recorded even when nothing is pending, which is the common case: this is the
+        // only durable evidence that the link went away rather than never existing.
+        if !isDisconnectingIntentionally { didLoseConnection = true }
         failPendingRequest(with: .connectionLost)
         completeConnection(.failure(OBDError.connectionLost))
     }
@@ -257,6 +302,18 @@ extension BluetoothOBDTransport: CBPeripheralDelegate {
                     error: Error?) {
         guard error == nil else { return }
         adopt(characteristics: service.characteristics ?? [], of: peripheral)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard error == nil else {
+            completeConnection(.failure(OBDError.connectionFailed("The adapter would not turn on notifications.")))
+            return
+        }
+        guard characteristic.isNotifying else { return }
+        notifyCharacteristic = characteristic
+        completeReadinessIfPossible()
     }
 
     func peripheral(_ peripheral: CBPeripheral,
@@ -295,9 +352,23 @@ final class BluetoothAdapterScanner: NSObject {
         var id: UUID
         var name: String
         var signalStrength: Int
+        /// Whether this looks like an OBD adapter rather than a pair of headphones.
+        var isLikelyAdapter: Bool = true
     }
 
-    private(set) var discoveries: [Discovery] = []
+    /// Candidates worth showing a driver.
+    ///
+    /// Filtered, because it used to be every advertising BLE peripheral in range: watches,
+    /// headphones, televisions, someone else's tyre sensors. A pairing screen that asks a
+    /// driver to pick their adapter out of that is asking them to guess.
+    var discoveries: [Discovery] { showsEverything ? allDiscoveries : allDiscoveries.filter(\.isLikelyAdapter) }
+
+    /// Everything seen, adapter-like or not. For a debug screen, not the pairing screen.
+    private(set) var allDiscoveries: [Discovery] = []
+
+    /// Debug builds only, and off by default even there.
+    var showsEverything = false
+
     private(set) var isScanning = false
     private(set) var authorisationMessage: String?
 
@@ -305,7 +376,7 @@ final class BluetoothAdapterScanner: NSObject {
 
     func start() {
         guard !isScanning else { return }
-        discoveries = []
+        allDiscoveries = []
         isScanning = true
         if central == nil {
             central = CBCentralManager(delegate: self, queue: .main)
@@ -348,15 +419,20 @@ extension BluetoothAdapterScanner: CBCentralManagerDelegate {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? "Unnamed device"
         let identifier = peripheral.identifier
         let strength = RSSI.intValue
+        let isLikely = BluetoothOBDTransport.looksLikeAdapter(name: peripheral.name,
+                                                              advertisement: advertisementData)
         Task { @MainActor in
-            let discovery = Discovery(id: identifier, name: name, signalStrength: strength)
-            if let index = self.discoveries.firstIndex(where: { $0.id == identifier }) {
-                self.discoveries[index] = discovery
+            let discovery = Discovery(id: identifier,
+                                      name: name,
+                                      signalStrength: strength,
+                                      isLikelyAdapter: isLikely)
+            if let index = self.allDiscoveries.firstIndex(where: { $0.id == identifier }) {
+                self.allDiscoveries[index] = discovery
             } else {
-                self.discoveries.append(discovery)
+                self.allDiscoveries.append(discovery)
             }
             // Strongest signal first: the adapter in this car, not one two cars away.
-            self.discoveries.sort { $0.signalStrength > $1.signalStrength }
+            self.allDiscoveries.sort { $0.signalStrength > $1.signalStrength }
         }
     }
 }
