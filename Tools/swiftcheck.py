@@ -235,6 +235,11 @@ def collect_declarations(files):
                 owner = next((name for name, _ in reversed(stack) if name), None)
                 if owner:
                     members[owner].add(m.group(1))
+                    # `case a, b, c` and `let x, y` declare several names at once.
+                    tail = code[m.end():code.find("\n", m.end()) if code.find("\n", m.end()) != -1 else len(code)]
+                    if tail.lstrip().startswith(","):
+                        for extra in re.findall(r"[,(]\s*([a-zA-Z_][A-Za-z0-9_]*)", tail):
+                            members[owner].add(extra)
                 i = m.end()
                 continue
 
@@ -317,6 +322,39 @@ Speech AVFoundation AVAudioSession AVSpeechSynthesizer AVSpeechUtterance
 MapKit MKMapView MKCoordinateRegion MKPolyline Map MapPolyline MapCameraPosition
 Charts Combine AnyCancellable PassthroughSubject CurrentValueSubject
 Instruments SF Symbols Swift Darwin Dispatch DriveLayerCore DriveLayerApp
+SwiftUI UIKit CoreBluetooth CoreLocation CoreMotion WeatherKit CarPlay Observation
+ForEach GeometryReader StrokeStyle Canvas TimelineView PhaseAnimator KeyframeAnimator
+ScrollViewReader ViewThatFits AnyView EmptyView TupleView ModifiedContent
+Table TableColumn Toolbar ToolbarPlacement ToolbarItemPlacement NavigationBarItem
+Symbol SymbolRenderingMode ContentTransition AnyShapeStyle HierarchicalShapeStyle
+TextField SecureField TextEditor DatePicker ColorPicker Link ShareLink Gauge
+LabeledContent DisclosureGroup OutlineGroup NavigationSplitViewVisibility
+PresentationDetent PresentationAdaptation VisualEffect BackgroundStyle
+LocalizedStringKey Text Image Label AsyncImage ProgressViewStyle ButtonStyle
+ButtonRole Prominence ControlSize Visibility TextAlignment LineLimit
+UIColor UIFont UIImpactFeedbackGenerator UISelectionFeedbackGenerator
+UIApplicationShortcutItem UIBackgroundTaskIdentifier
+CLLocationManagerDelegate CLBackgroundActivitySession
+UNUserNotificationCenter UNNotificationRequest UNMutableNotificationContent
+UNTimeIntervalNotificationTrigger UNCalendarNotificationTrigger UNNotificationSound
+UNAuthorizationOptions UNNotificationSettings
+CPListTemplateItem CPSelectableListItem CPMessageListItem CPTemplateApplicationDashboardScene
+CPInstrumentClusterController CPManeuver CPTravelEstimates CPTrip CPRouteChoice
+WidgetKind AppIntentTimelineProvider ConfigurationAppIntent WidgetInfo
+ActivityViewContext ActivityPreviewViewKind AlertConfiguration
+EntityIdentifier IntentAuthenticationPolicy AppShortcutPhrase ShortcutTileColor
+FileProtection FileAttributeKey URLResourceValues URLFileProtection
+SecAccessControl SecAccessControlCreateFlags CFString CFDictionary OSStatus
+JSONSerialization PropertyListEncoder PropertyListDecoder
+RelativeDateTimeFormatter ISO8601DateFormatter ByteCountFormatter ListFormatter
+FetchDescriptor SortDescriptor PersistentModel ModelActor DefaultHistoryToken
+Type Protocol Predicate PredicateExpression Expression
+ViewBuilder ToolbarContentBuilder ToolbarContent SceneBuilder WidgetBundleBuilder
+Bindable Entry PreviewProvider PreviewModifier
+CommandsBuilder MenuBuilder AccessibilityRotorContentBuilder TableColumnBuilder
+CBCentralManagerScanOptionAllowDuplicatesKey CBConnectPeripheralOptionNotifyOnDisconnectionKey
+CBAdvertisementDataServiceUUIDsKey CBAdvertisementDataManufacturerDataKey
+PersonNameComponentsFormatter EnergyFormatter LengthFormatter
 NSRegularExpression NSRange NSTextCheckingResult NSDataDetector NSAttributedString
 NSPredicate NSSortDescriptor NSCache NSError NSKeyedArchiver NSKeyedUnarchiver
 CaseIterable ExpressibleByStringLiteral ExpressibleByArrayLiteral ExpressibleByIntegerLiteral
@@ -361,12 +399,17 @@ FORBIDDEN_CORE_IMPORTS = {
     "VisionKit", "Vision", "Charts",
 }
 
+# (pattern, reason, paths where the pattern is legitimate)
 BANNED_PATTERNS = [
-    (re.compile(r"\bwriteValue\s*\(", re.I), "direct characteristic writes must go through the OBD transport"),
-    (re.compile(r"\bATSH\b|\bATCRA\b|\bATCAF0\b"), "raw CAN addressing commands are outside the read-only policy"),
-    (re.compile(r'"\s*04\s*"'), "mode 04 (clear diagnostic information) is not permitted"),
+    (re.compile(r"\bwriteValue\s*\(", re.I),
+     "Bluetooth characteristic writes belong only in the OBD transport",
+     ("App/DriveLayerApp/Services/BluetoothOBDTransport.swift",)),
+    (re.compile(r"\bATSH\b|\bATCRA\b|\bATCAF0\b"),
+     "raw CAN addressing commands are outside the read-only policy", ()),
+    (re.compile(r'"\s*04\s*"'),
+     "mode 04 (clear diagnostic information) is not permitted", ()),
     (re.compile(r"\bclearDTC|\bclearTroubleCodes|\bresetECU|\bflashECU|\bforceRegen", re.I),
-     "write/control operations are outside the read-only policy"),
+     "write/control operations are outside the read-only policy", ()),
 ]
 
 
@@ -463,7 +506,9 @@ def main() -> int:
 
     # Safety policy
     for path, raw in raw_files.items():
-        for pattern, reason in BANNED_PATTERNS:
+        for pattern, reason, allowed in BANNED_PATTERNS:
+            if any(path.replace(os.sep, "/").endswith(allowance) for allowance in allowed):
+                continue
             for match in pattern.finditer(raw):
                 line = raw.count("\n", 0, match.start()) + 1
                 errors.append(f"{path}:{line}: banned pattern — {reason}")
