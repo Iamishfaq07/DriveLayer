@@ -42,6 +42,50 @@ jobs:
       - name: Test
         run: swift test --parallel
 
+  # Runs the tests that `swift test` cannot: the stores, the services and the
+  # coordinator, which need SwiftData, CoreLocation, CoreMotion and friends. This is
+  # the job that covers the layer where the reliability bugs actually were.
+  app-tests:
+    name: App tests (iOS Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Pick a simulator
+        id: sim
+        # Chosen at run time rather than hard-coded: the runner image's simulator
+        # list changes with every Xcode update, and a pinned device name is a build
+        # that breaks on someone else's schedule.
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          for runtime, entries in devices.items():
+              if 'iOS' not in runtime:
+                  continue
+              for entry in entries:
+                  if 'iPhone' in entry.get('name', ''):
+                      print(entry['udid'])
+                      sys.exit(0)
+          sys.exit('no iPhone simulator available')
+          ")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $UDID"
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test -quiet \
+            -project DriveLayer.xcodeproj \
+            -scheme DriveLayer \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:DriveLayerAppTests \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
   # Compiles the app and the widget extension for the simulator. Code signing is
   # disabled because CI has no team and does not need one to prove it builds.
   app-build:
