@@ -17,6 +17,9 @@ enum BaselineContext: String, Codable, CaseIterable, Sendable {
     case coldEngine
     /// Engine warmed up and driving.
     case warmedUp
+    /// Engine not running. Resting battery voltage is a different measurement from
+    /// charging voltage, and comparing one with the other is meaningless.
+    case engineOff
 
     var displayName: String {
         switch self {
@@ -26,6 +29,7 @@ enum BaselineContext: String, Codable, CaseIterable, Sendable {
         case .climbing: return "climbs"
         case .coldEngine: return "a cold engine"
         case .warmedUp: return "a warm engine"
+        case .engineOff: return "a resting engine"
         }
     }
 }
@@ -226,7 +230,11 @@ enum BaselineEngine {
     static func context(speedKmh: Double?,
                         engineLoadPercent: Double?,
                         coolantTemperatureC: Double?,
-                        gradientPercent: Double?) -> BaselineContext {
+                        gradientPercent: Double?,
+                        isEngineRunning: Bool? = nil) -> BaselineContext {
+        // Engine state comes first: a reading taken at rest belongs with other
+        // readings taken at rest, whatever the coolant temperature happens to be.
+        if isEngineRunning == false { return .engineOff }
         if let coolant = coolantTemperatureC, coolant < 70 { return .coldEngine }
         if let speed = speedKmh, speed < 3 { return .idle }
         if let gradient = gradientPercent, gradient >= 3 { return .climbing }

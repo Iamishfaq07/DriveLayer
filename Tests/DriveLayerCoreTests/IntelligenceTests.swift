@@ -70,6 +70,13 @@ final class BaselineEngineTests: XCTestCase {
     func testContextClassification() {
         XCTAssertEqual(BaselineEngine.context(speedKmh: 0, engineLoadPercent: 15,
                                               coolantTemperatureC: 90, gradientPercent: 0), .idle)
+        XCTAssertEqual(BaselineEngine.context(speedKmh: 0, engineLoadPercent: nil,
+                                              coolantTemperatureC: 90, gradientPercent: nil,
+                                              isEngineRunning: false), .engineOff,
+                       "engine state outranks everything: a resting reading is not an idling one")
+        XCTAssertEqual(BaselineEngine.context(speedKmh: 0, engineLoadPercent: nil,
+                                              coolantTemperatureC: 30, gradientPercent: nil,
+                                              isEngineRunning: false), .engineOff)
         XCTAssertEqual(BaselineEngine.context(speedKmh: 40, engineLoadPercent: 20,
                                               coolantTemperatureC: 40, gradientPercent: 0), .coldEngine)
         XCTAssertEqual(BaselineEngine.context(speedKmh: 55, engineLoadPercent: 75,

@@ -46,7 +46,10 @@ jobs:
   # disabled because CI has no team and does not need one to prove it builds.
   app-build:
     name: App build (iOS Simulator)
-    runs-on: macos-14
+    # macos-15 carries an Xcode new enough to open the project format current
+    # XcodeGen emits. On macos-14 the generated project is rejected as "a future
+    # Xcode project file format".
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -58,7 +61,7 @@ jobs:
           xcodebuild build \
             -project DriveLayer.xcodeproj \
             -scheme DriveLayer \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""

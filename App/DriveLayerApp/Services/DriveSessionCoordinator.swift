@@ -245,7 +245,8 @@ final class DriveSessionCoordinator {
         let context = BaselineEngine.context(speedKmh: telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
                                              engineLoadPercent: telemetry.value(.engineLoadPercent, freshWithin: 20, now: now),
                                              coolantTemperatureC: telemetry.value(.coolantTemperatureC, freshWithin: 60, now: now),
-                                             gradientPercent: gradient?.percent)
+                                             gradientPercent: gradient?.percent,
+                                             isEngineRunning: telemetry.isEngineRunning(now: now))
         for metric in [VehicleMetric.coolantTemperatureC, .controlModuleVoltageV, .engineLoadPercent, .fuelRateLitresPerHour] {
             guard let value = telemetry.value(metric, freshWithin: 60, now: now) else { continue }
             BaselineEngine.accumulate(into: &pendingBaselines,

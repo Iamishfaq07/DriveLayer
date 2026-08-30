@@ -65,7 +65,6 @@ enum DTCCatalog {
 
     /// Structural interpretation, using only what the code format itself guarantees.
     static func fallbackExplanation(for code: String) -> DTCExplanation {
-        let system = DTCSystem(rawValue: String(code.prefix(1))) ?? .powertrain
         let isManufacturerSpecific = code.count >= 2 && (code.dropFirst().first == "1" || code.dropFirst().first == "3")
         let area = subsystemDescription(for: code)
 

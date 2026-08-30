@@ -83,3 +83,7 @@ struct Provenanced<Value: Sendable & Equatable>: Equatable, Sendable {
 
     var isAvailable: Bool { value != nil }
 }
+
+// Conditional conformance must be declared in the same file as the type for the
+// compiler to synthesise `init(from:)`.
+extension Provenanced: Codable where Value: Codable {}

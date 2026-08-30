@@ -234,5 +234,3 @@ struct Trip: Codable, Sendable, Equatable, Identifiable {
         return (distanceMetres / total) * 3.6
     }
 }
-
-extension Provenanced: Codable where Value: Codable {}
