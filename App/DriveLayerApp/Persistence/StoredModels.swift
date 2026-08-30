@@ -228,17 +228,92 @@ final class StoredRoadEvent {
     func value() throws -> RoadImpactEvent { try StoredCoding.decode(RoadImpactEvent.self, from: payload) }
 }
 
+/// Encodes and decodes the domain values stored inside each record.
+///
+/// Payloads carry their version. They did not before, and the comment on
+/// `DriveLayerSchema.models` telling the reader to bump a version described a discipline
+/// that did not exist -- there was nothing to bump. The consequence was not theoretical:
+/// rename one field on `Trip`, ship it, and every stored drive stops decoding. Combined
+/// with the `compactMap { try? }` at each load site, a driver would have opened DriveLayer
+/// to an empty history with nothing logged and nothing to recover from.
+///
+/// The version lives in the payload rather than in a new SwiftData column deliberately.
+/// It needs no schema migration to introduce, it travels with the bytes it describes, and
+/// data written before any of this existed is still readable -- a bare payload is simply
+/// version 0.
 enum StoredCoding {
-    static func encode<T: Encodable>(_ value: T) throws -> Data {
+
+    /// Bump when a stored domain model changes shape in a way older data cannot satisfy,
+    /// and add the step to `migrate(_:from:)` in the same commit.
+    static let currentVersion = 1
+
+    /// Version 0 is anything written before payloads were versioned. Its shape is
+    /// identical to version 1; the number exists so the two can be told apart.
+    static let legacyVersion = 0
+
+    enum Failure: Error, Equatable {
+        /// Written by a newer build than this one. Refused rather than guessed at, so a
+        /// downgrade cannot quietly rewrite data it does not understand.
+        case unsupportedVersion(found: Int, supported: Int)
+    }
+
+    private struct OutgoingEnvelope<Value: Encodable>: Encodable {
+        var version: Int
+        var value: Value
+        enum CodingKeys: String, CodingKey { case version = "v", value = "p" }
+    }
+
+    private struct IncomingEnvelope<Value: Decodable>: Decodable {
+        var version: Int
+        var value: Value
+        enum CodingKeys: String, CodingKey { case version = "v", value = "p" }
+    }
+
+    private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(value)
+        return encoder
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    static func encode<T: Encodable>(_ value: T) throws -> Data {
+        try encoder.encode(OutgoingEnvelope(version: currentVersion, value: value))
     }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // An envelope is tried first; a bare payload is pre-versioning data, not an error.
+        // Deliberately ordered this way round because the envelope is the common case and
+        // the legacy read is the fallback, which is also the direction that stops being
+        // exercised over time.
+        if let envelope = try? decoder.decode(IncomingEnvelope<T>.self, from: data) {
+            try checkSupported(envelope.version)
+            return envelope.value
+        }
         return try decoder.decode(type, from: data)
+    }
+
+    /// The version an encoded payload declares, or `legacyVersion` for bare data.
+    ///
+    /// Separate from decoding so a record can be inspected without being able to decode
+    /// it, which is exactly the position a build is in when it meets a newer payload.
+    static func version(of data: Data) -> Int {
+        struct VersionOnly: Decodable {
+            var version: Int
+            enum CodingKeys: String, CodingKey { case version = "v" }
+        }
+        guard let probe = try? decoder.decode(VersionOnly.self, from: data) else { return legacyVersion }
+        return probe.version
+    }
+
+    private static func checkSupported(_ version: Int) throws {
+        guard version <= currentVersion else {
+            throw Failure.unsupportedVersion(found: version, supported: currentVersion)
+        }
     }
 }
 
