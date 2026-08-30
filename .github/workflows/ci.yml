@@ -58,7 +58,8 @@ jobs:
         run: xcodegen generate
       - name: Build
         run: |
-          xcodebuild build \
+          set -o pipefail
+          xcodebuild build -quiet \
             -project DriveLayer.xcodeproj \
             -scheme DriveLayer \
             -destination 'generic/platform=iOS Simulator' \

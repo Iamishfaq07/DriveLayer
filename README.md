@@ -26,38 +26,45 @@ Heavy rain expected about 14 km ahead
 
 The development environment for this work had **no Swift toolchain**: `swift.org` is
 blocked by the sandbox's egress policy, and there is no macOS, no Xcode, and no iOS
-SDK. **None of this code has been compiled.**
+SDK. Nothing could be compiled locally.
 
-That constraint shaped the work rather than being hidden by it:
+So compilation was moved to CI instead. `.github/workflows/ci.yml` runs three jobs —
+static checks on Ubuntu, `swift build` + `swift test` on macOS, and an Xcode build of
+the app and widget for the simulator. Check the badge and the Actions tab for the
+current state; the honest summary is that the core reached the compiler on its first
+CI run and is being driven to green from there.
 
-| What | Status |
+| What | Where it happens |
 |---|---|
-| Architecture, models, algorithms | Written and reviewed carefully |
-| `Tools/swiftcheck.py` static checks | **Run, passing** — 105 files, 346 types, 0 errors |
-| Swift compilation | **Not performed** — no toolchain available |
-| `swift test` (217 tests) | **Not run** — written against the implementation, not yet executed |
-| Xcode build, device run, CarPlay | **Not performed** |
+| `Tools/swiftcheck.py` static checks | Locally and in CI, on every change |
+| Swift compilation of the core | CI (`macos-14`), not locally |
+| `swift test` (229 tests) | CI (`macos-14`) |
+| Xcode build of app + widget | CI (`macos-15`) |
+| Device run, CarPlay, real adapter | Not performed — needs hardware |
 
 `Tools/swiftcheck.py` is a static consistency checker written for this project. It is
-not a compiler and does not pretend to be one, but it does catch a real class of
+not a compiler and does not pretend to be one, but it catches a real class of
 mistakes: bracket balance (comment- and string-aware), duplicate type declarations,
 references to types that are declared nowhere, `Type.member` references against the
 members that type actually declares, import policy violations, banned write/control
-APIs, and missing paths in `project.yml`. It found and fixed real errors during
-development.
+APIs, and missing paths in `project.yml`. It found real errors during development.
 
-**Expect compiler errors on the first real build.** They are most likely to be
-mechanical — an argument label, a `some View` inference, an actor-isolation
-annotation — rather than architectural. Two genuine logic bugs were found and fixed
-while writing the tests (document reference-number extraction matching dates, and a
-gradient calculation that systematically understated slope); those are the kind of
-thing the test suite exists to catch.
+It also has a known blind spot the first CI run exposed: it cannot resolve
+leading-dot member references like `.engineOff`, because those need type inference.
+That is exactly how a real bug survived to CI — `BaselineContext` had no `engineOff`
+case, so the battery trend insight could never have fired. The compiler caught it;
+the checker could not have.
+
+Three genuine logic bugs have been found and fixed so far: document reference-number
+extraction matching dates once separators were stripped, a gradient calculation that
+systematically understated slope, and the battery baseline context above. The first
+two came from writing tests, the third from CI.
 
 ## Getting started
 
 ```bash
 # Run the logic tests — no Xcode, no car, no phone required
-swift test
+swift test          # 229 tests
 
 # Generate the Xcode project and open it
 brew install xcodegen

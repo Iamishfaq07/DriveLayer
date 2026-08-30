@@ -34,7 +34,8 @@ final class SimulatorTests: XCTestCase {
         let (session, _) = makeSession(.normalHighway, clock: clock)
         try await session.start()
 
-        let capabilities = try XCTUnwrap(await session.capabilities)
+        let report = await session.capabilities
+        let capabilities = try XCTUnwrap(report)
         XCTAssertTrue(capabilities.supports(.current(0x0C)))
         XCTAssertTrue(capabilities.supports(.current(0x42)))
         XCTAssertTrue(capabilities.availableMetrics.contains(.fuelLevelPercent))
@@ -45,7 +46,8 @@ final class SimulatorTests: XCTestCase {
         let (session, _) = makeSession(.sensorUnavailable, clock: clock)
         try await session.start()
 
-        let capabilities = try XCTUnwrap(await session.capabilities)
+        let report = await session.capabilities
+        let capabilities = try XCTUnwrap(report)
         XCTAssertFalse(capabilities.supports(.current(0x05)), "coolant is not reported in this scenario")
         XCTAssertFalse(capabilities.availableMetrics.contains(.coolantTemperatureC))
 
