@@ -10,7 +10,9 @@ private final class ScriptedTransport: OBDTransport, @unchecked Sendable {
     let identifier = "scripted-adapter"
     let displayName = "Scripted adapter"
 
-    private let lock = NSLock()
+    /// A queue rather than an `NSLock`: `send` is async, and `NSLock.lock()` is
+    /// unavailable from an asynchronous context - a warning now and an error in Swift 6.
+    private let queue = DispatchQueue(label: "scripted-transport")
     private var replies: [String: String]
     private var log: [String] = []
 
@@ -22,23 +24,19 @@ private final class ScriptedTransport: OBDTransport, @unchecked Sendable {
     func disconnect() async {}
 
     func send(_ command: String, timeout: TimeInterval) async throws -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        log.append(command)
-        return replies[command] ?? "NO DATA\r\r>"
+        queue.sync {
+            log.append(command)
+            return replies[command] ?? "NO DATA\r\r>"
+        }
     }
 
     /// Changes what a command answers, standing in for a fault appearing while driving.
     func set(_ command: String, to reply: String) {
-        lock.lock()
-        replies[command] = reply
-        lock.unlock()
+        queue.sync { replies[command] = reply }
     }
 
     var requests: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return log
+        queue.sync { log }
     }
 
     func requestCount(of command: String) -> Int {

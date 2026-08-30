@@ -127,7 +127,9 @@ enum DLColor {
     /// derived ones read as quieter.
     static func provenance(_ provenance: DataProvenance) -> Color {
         switch provenance {
-        case .measured: return primaryText
+        // A value you typed is as certain as one the car measured -- the uncertainty in
+        // `DataProvenance.confidence` is 1.0 for both -- so it reads at full weight.
+        case .measured, .userEntered: return primaryText
         case .estimated, .inferred: return secondaryText
         case .unavailable: return unknown
         }

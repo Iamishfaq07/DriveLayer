@@ -46,6 +46,12 @@ declares only the core library and its test target; the app target exists solely
 Almost every confirmed bug below lives in that untested layer. That is not a
 coincidence, and it is the single most important structural finding of this audit.
 
+**Addressed after this audit.** `c0c88c1` added a `DriveLayerAppTests` target and an
+`app-tests` CI job; it now carries 21 tests across 3 suites over the coordinator, the
+stores and the recovery paths. The table above is the state at `f1c0489` and is left
+standing as the record, but "Test files: 0" and "compiled, never tested" no longer
+describe the app target. `swift test` still cannot reach it — that part holds.
+
 ---
 
 ## Confirmed bugs

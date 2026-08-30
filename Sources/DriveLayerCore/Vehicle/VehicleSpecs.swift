@@ -105,6 +105,21 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
     case warmUpDurationSeconds
     case idleFractionPercent
     case tripDistanceKm
+    // Added for the Hyperion work. Fuel trims and equivalence ratio are the two that
+    // matter most: they are how a petrol engine reports what it is doing about the
+    // mixture, and they mean nothing without the conditions they were measured in.
+    case shortTermFuelTrimPercent
+    case longTermFuelTrimPercent
+    case commandedEquivalenceRatio
+    case fuelRailPressureKPa
+    case catalystTemperatureC
+    case ethanolPercent
+    case barometricPressureKPa
+    case oilTemperatureC
+    case absoluteLoadPercent
+    case acceleratorPedalPercent
+    case massAirFlowGramsPerSecond
+    case timingAdvanceDegrees
 
     var displayName: String {
         switch self {
@@ -123,6 +138,18 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .warmUpDurationSeconds: return "Warm-up duration"
         case .idleFractionPercent: return "Idle share"
         case .tripDistanceKm: return "Trip distance"
+        case .shortTermFuelTrimPercent: return "Short-term fuel trim"
+        case .longTermFuelTrimPercent: return "Long-term fuel trim"
+        case .commandedEquivalenceRatio: return "Commanded equivalence ratio"
+        case .fuelRailPressureKPa: return "Fuel rail pressure"
+        case .catalystTemperatureC: return "Catalyst temperature"
+        case .ethanolPercent: return "Ethanol content"
+        case .barometricPressureKPa: return "Barometric pressure"
+        case .oilTemperatureC: return "Oil temperature"
+        case .absoluteLoadPercent: return "Absolute engine load"
+        case .acceleratorPedalPercent: return "Accelerator pedal"
+        case .massAirFlowGramsPerSecond: return "Mass air flow"
+        case .timingAdvanceDegrees: return "Ignition timing"
         }
     }
 
@@ -138,6 +165,13 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .economyKmPerLitre: return "km/L"
         case .warmUpDurationSeconds: return "s"
         case .tripDistanceKm: return "km"
+        case .shortTermFuelTrimPercent, .longTermFuelTrimPercent,
+             .ethanolPercent, .absoluteLoadPercent, .acceleratorPedalPercent: return "%"
+        case .commandedEquivalenceRatio: return "λ"
+        case .fuelRailPressureKPa, .barometricPressureKPa: return "kPa"
+        case .catalystTemperatureC, .oilTemperatureC: return "°C"
+        case .massAirFlowGramsPerSecond: return "g/s"
+        case .timingAdvanceDegrees: return "°"
         }
     }
 }

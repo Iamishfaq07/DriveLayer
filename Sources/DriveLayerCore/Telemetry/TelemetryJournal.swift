@@ -21,11 +21,14 @@ struct TelemetryJournal: Sendable {
 
     /// Where both the chunk directories and the compacted files live.
     let root: URL
-    private let fileManager: FileManager
 
-    init(root: URL, fileManager: FileManager = .default) {
+    /// `FileManager` is not `Sendable`, so holding one as a stored property makes this
+    /// struct only conditionally safe to send - a warning today and an error in Swift 6.
+    /// Nothing needed to inject one, so it is read from `.default` at each use instead.
+    private var fileManager: FileManager { .default }
+
+    init(root: URL) {
         self.root = root
-        self.fileManager = fileManager
     }
 
     // MARK: - Paths
