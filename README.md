@@ -28,19 +28,21 @@ The development environment for this work had **no Swift toolchain**: `swift.org
 blocked by the sandbox's egress policy, and there is no macOS, no Xcode, and no iOS
 SDK. Nothing could be compiled locally.
 
-So compilation was moved to CI instead. `.github/workflows/ci.yml` runs three jobs —
-static checks on Ubuntu, `swift build` + `swift test` on macOS, and an Xcode build of
-the app and widget for the simulator. Check the badge and the Actions tab for the
-current state; the honest summary is that the core reached the compiler on its first
-CI run and is being driven to green from there.
+So compilation was moved to CI. `.github/workflows/ci.yml` runs three jobs, and **all
+three pass**:
 
-| What | Where it happens |
-|---|---|
-| `Tools/swiftcheck.py` static checks | Locally and in CI, on every change |
-| Swift compilation of the core | CI (`macos-14`), not locally |
-| `swift test` (229 tests) | CI (`macos-14`) |
-| Xcode build of app + widget | CI (`macos-15`) |
-| Device run, CarPlay, real adapter | Not performed — needs hardware |
+| Job | Runner | What it proves |
+|---|---|---|
+| Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths |
+| Core tests | `macos-14` | `DriveLayerCore` compiles and its **229 tests across 33 suites** pass |
+| App build | `macos-15` | The app and widget extension compile for the iOS Simulator |
+
+What is still **not** verified, and needs hardware:
+
+- Running on a device, and anything that depends on real sensors.
+- A real Bluetooth OBD-II adapter against a real vehicle.
+- CarPlay, which needs Apple's driving-task entitlement.
+- WeatherKit, which needs a paid capability.
 
 `Tools/swiftcheck.py` is a static consistency checker written for this project. It is
 not a compiler and does not pretend to be one, but it catches a real class of
@@ -53,18 +55,26 @@ It also has a known blind spot the first CI run exposed: it cannot resolve
 leading-dot member references like `.engineOff`, because those need type inference.
 That is exactly how a real bug survived to CI — `BaselineContext` had no `engineOff`
 case, so the battery trend insight could never have fired. The compiler caught it;
-the checker could not have.
+the checker could not have. Run `swift test` before trusting a change, not just the
+checker.
 
-Three genuine logic bugs have been found and fixed so far: document reference-number
-extraction matching dates once separators were stripped, a gradient calculation that
-systematically understated slope, and the battery baseline context above. The first
-two came from writing tests, the third from CI.
+Four genuine defects have been found and fixed so far, and none of them were typos:
+
+1. Document reference-number extraction matched dates once separators were stripped.
+2. The gradient calculator mixed median-filtered endpoints with raw distances, which
+   systematically understated slope. It now fits across the whole window.
+3. `BaselineContext` had no `engineOff` case, so resting battery voltage was never
+   filed anywhere the battery trend insight could find it.
+4. `StatusIndicator`'s accessibility label was mistyped *and* wrong: the element is
+   combined, so the SF Symbol alone told VoiceOver nothing.
+
+The first two came from writing tests; the last two from CI.
 
 ## Getting started
 
 ```bash
 # Run the logic tests — no Xcode, no car, no phone required
-swift test          # 229 tests
+swift test          # 229 tests, 33 suites
 
 # Generate the Xcode project and open it
 brew install xcodegen

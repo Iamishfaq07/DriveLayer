@@ -1,8 +1,11 @@
 # Roadmap
 
-Maintained as work proceeds. Status reflects what is **written and statically
-checked**, not what has been compiled or run — see the verification note in the
-README, and "Known gaps" at the end of this file.
+Maintained as work proceeds.
+
+**CI is green.** All three jobs pass: static checks, `swift build` + `swift test`
+(229 tests across 33 suites) on macOS, and an Xcode build of the app and widget
+extension for the iOS Simulator. What remains unverified needs hardware — see
+"Known gaps" at the end of this file.
 
 ---
 
@@ -137,15 +140,13 @@ through three App Intents.
 
 ## Phase 16 — Testing, polish, performance, privacy · **Partially done**
 
-- 217 tests across 32 suites, weighted towards failure cases. **Written, not yet
-  run** — no toolchain here.
+- 229 tests across 33 suites, weighted towards failure cases. **Passing in CI.**
 - Performance decisions made where they matter: per-metric refresh classes, sampling
   deadbands, the compact telemetry codec, split drive/analysis rates, location
   fidelity tied to what the user is doing, throttled widget and Live Activity updates.
 - Privacy: local-only storage, file protection, retention controls, export, delete-all,
   redacting logger, snapshot boundary for the copilot.
-- **Not done:** running the tests, profiling on a device, accessibility audit,
-  localisation.
+- **Not done:** profiling on a device, a full accessibility audit, localisation.
 
 ---
 
@@ -155,8 +156,9 @@ Honest list of what is scaffolding rather than working software.
 
 | Area | State |
 |---|---|
-| **Compilation** | Never performed. Expect mechanical compiler errors on first build. |
-| **Test execution** | 217 tests written against the implementation; never run. |
+| **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
+| **Test execution** | 229 tests passing in CI. |
+| **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
 | **Elevation provider** | Protocol plus an honest mock. No real elevation source is bundled, so terrain-ahead is only live with a provider configured. |
@@ -171,14 +173,15 @@ Honest list of what is scaffolding rather than working software.
 
 ## Next up (V1 completion)
 
-1. **Build it.** Generate the project on a Mac, fix the first round of compiler
-   errors, run `swift test`, fix what the tests find.
-2. Wire the VisionKit capture flow to the existing extractor.
-3. Populate Live Activity range and capture trip weather.
-4. Local notifications for document expiry and overdue service.
+1. ~~Build it.~~ **Done** — CI compiles everything and runs the suite.
+2. ~~Local notifications for document expiry and overdue service.~~ **Done.**
+3. ~~Populate Live Activity range and capture trip weather.~~ **Done.**
+4. Wire the VisionKit capture flow to the existing, tested extractor.
 5. Widget deep links.
 6. Accessibility pass: Dynamic Type at the largest sizes, VoiceOver labels on every
    metric, contrast check on the status palette.
+7. Run it on a device against a real adapter — the first thing that will find
+   problems no amount of CI can.
 
 ## V2
 
