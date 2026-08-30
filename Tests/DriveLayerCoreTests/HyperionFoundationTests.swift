@@ -97,6 +97,70 @@ final class SensorSanityTests: XCTestCase {
         XCTAssertEqual(gate.consecutiveRejections, 0)
     }
 
+    /// The gate used to count rejections without looking at why, so three repeats of
+    /// anything at all were believed. A coolant sensor reading 500 C is not reporting a
+    /// hot engine, it is reporting that it is broken, and repetition is the evidence for
+    /// that rather than against it.
+    func testAnImpossibleReadingIsNeverAcceptedHoweverOftenItRepeats() {
+        var gate = SensorGate(metric: .coolantTemperatureC, plausibleRange: -40...215)
+        gate.offer(90, at: start)
+
+        for second in 1...10 {
+            XCTAssertNil(gate.offer(500, at: start.addingTimeInterval(Double(second))),
+                         "offer \(second) of an out-of-range value was accepted")
+        }
+
+        XCTAssertEqual(gate.current.value, 90, "the last good reading still stands")
+        XCTAssertNotNil(gate.current.basis, "and the UI is told the newest was rejected")
+    }
+
+    func testASensorDefaultIsNeverAcceptedHoweverOftenItRepeats() {
+        var gate = SensorGate(metric: .engineRPM, plausibleRange: 0...8_000)
+        gate.offer(2_000, at: start)
+
+        // Zero rpm is inside the plausible range, so only the sensor-default rule stands
+        // between this and DriveLayer believing a running engine has stopped turning.
+        for second in 1...10 {
+            XCTAssertNil(gate.offer(0, at: start.addingTimeInterval(Double(second)), engineRunning: true),
+                         "offer \(second) of a sensor default was accepted")
+        }
+
+        XCTAssertEqual(gate.current.value, 2_000)
+    }
+
+    func testAStaleReadingIsHeldRatherThanEventuallyBelievedFresh() {
+        var gate = SensorGate(metric: .engineRPM, plausibleRange: 0...8_000, staleAfter: 10)
+        gate.offer(2_000, at: start)
+
+        for second in 11...20 {
+            XCTAssertNil(gate.offer(2_000, at: start.addingTimeInterval(Double(second))),
+                         "a frozen reading must not be re-accepted as a fresh one")
+        }
+
+        XCTAssertEqual(gate.current.value, 2_000, "held, with a basis explaining why")
+        XCTAssertNotNil(gate.current.basis)
+    }
+
+    func testTheStreakStopsClimbingForAReadingThatCanNeverBeAccepted() {
+        var gate = SensorGate(metric: .coolantTemperatureC, plausibleRange: -40...215)
+        gate.offer(90, at: start)
+        for second in 1...50 {
+            gate.offer(500, at: start.addingTimeInterval(Double(second)))
+        }
+        // Capped rather than climbing to fifty: nothing downstream benefits from the
+        // difference, and an unbounded counter is a slow-motion overflow.
+        XCTAssertEqual(gate.consecutiveRejections, gate.rejectionsBeforeYielding)
+    }
+
+    func testOnlyAnImpossibleRateOfChangeMayEverYield() {
+        XCTAssertTrue(SensorSanity.Rejection.impossibleRateOfChange(perSecond: 80, limit: 5)
+            .mayYieldToPersistence)
+        XCTAssertFalse(SensorSanity.Rejection.outsidePlausibleRange(low: -40, high: 215)
+            .mayYieldToPersistence)
+        XCTAssertFalse(SensorSanity.Rejection.sensorDefault.mayYieldToPersistence)
+        XCTAssertFalse(SensorSanity.Rejection.stale(seconds: 30).mayYieldToPersistence)
+    }
+
     // MARK: - Staleness
 
     func testAnUnchangingValueGoesStale() {
