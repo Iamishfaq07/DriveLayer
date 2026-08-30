@@ -299,3 +299,84 @@ Crowdsourced road quality with real corroboration · camera-assisted road
 intelligence · multiple vehicle intelligence packs · optional cloud sync (opt-in,
 encrypted, never a requirement) · fleet and family garage · broader manufacturer
 integrations where they can be done legitimately.
+
+---
+
+# Hyperion Alpha
+
+The target for this pass. Audited at `115e7ef`; findings and their classifications are in
+[AUDIT.md](AUDIT.md) under "Hyperion Alpha audit — P0 pass".
+
+Statuses here are deliberately narrow. **IMPLEMENTED** means production code calls it,
+data reaches it, a user-facing surface shows its result, and tests cover the logic.
+Anything short of that is **PARTIAL**, **MOCK ONLY**, **BLOCKED ON HARDWARE** or
+**BLOCKED ON ENTITLEMENT**. A type existing and being unit-tested is not implemented —
+that mistake is what left four Hyperion analysers with no callers.
+
+## P0 — reliability and truthfulness
+
+| # | Item | Status |
+|---|---|---|
+| P0-1 | Logging abstraction | NOT APPLICABLE — iOS and macOS both ship `os`; no Linux target |
+| P0-2 | Confirmed telemetry persistence | PARTIAL — audited, fix pending |
+| P0-3 | Chunk numbering | IMPLEMENTED — highest sequence + 1, regression tested |
+| P0-4 | Journal reconciliation, orphan handling | PARTIAL — audited, fix pending |
+| P0-5 | Location requested-vs-actual state | PARTIAL — audited, fix pending |
+| P0-6 | GPS freshness before auto-start | PARTIAL — audited, fix pending |
+| P0-7 | Reconnect on any unexpected drop | PARTIAL — audited, fix pending |
+| P0-7b | Wait for `isNotifying` before ready | PARTIAL — audited, fix pending |
+| P0-7c | Filter the pairing screen, validate ELM | PARTIAL — audited, fix pending |
+| P0-8 | SensorGate must never yield to impossible values | PARTIAL — audited, fix pending |
+| P0-9 | Payload versioning and migration | PARTIAL — audited, fix pending |
+| P0-10 | Simulator isolation | PARTIAL — audited, fix pending |
+
+Two P0 findings are worth calling out because they are worse than the brief assumed.
+
+**P0-5** is not only about losing a high-fidelity mode. The first call at launch is
+`start(fidelity: .idle)`, so if permission is granted after launch, nothing starts at all
+and no drive can ever be detected — while `automaticDetectionStatus` still reports
+"Active", because it reads the settings flag and authorization and never asks whether
+tracking is actually running.
+
+**P0-7** means the reconnect supervisor landed in `ddc7dcc` is, in practice, unreachable
+for the ordinary disconnect. The poll loop idles 250 ms between reads, so a drop usually
+happens with no request in flight, and the resulting `.notConnected` fails the
+`.connectionLost` guard that is the only thing that starts a reconnect.
+
+## P1 — Hyperion intelligence
+
+Not started. Ordered as in the brief: remove diesel product logic, wire a real
+`HyperionGuardian` end to end, structured fuel system status, fuel trims, turbo and air,
+warm-up, heat soak, battery trends, MIL and DTC events, aftertreatment, contextual
+baselines.
+
+The Hyperion data layer that already exists — `EngineThermalModel`, `SensorGate`,
+`HeatSoakAnalyser`, `InsightConfidence` — is **MOCK ONLY** by the definition above: tested,
+and called by nothing. Wiring it is the first P1 task, not writing more analysers.
+
+## P2 — trip and route quality
+
+Not started: phone-only trip statistics, fused trip elevation, a production route terrain
+provider, Context Ahead, the trip event timeline, repeated-route comparison, the fuel
+journal.
+
+Route terrain is **MOCK ONLY**: `MockElevationProvider` is the sole conformer of
+`ElevationProviding` anywhere in the tree, so terrain-ahead has no live data source.
+
+## P3 — surfaces and scale
+
+Not started: CarPlay cleanup, Ask Harrier, the real-car capability scan, PID Lab, Debug
+Center expansion, performance and soak testing, UI polish.
+
+CarPlay is **BLOCKED ON ENTITLEMENT** and stays that way: the code is complete and needs
+Apple's driving-task entitlement plus the two edits documented in
+[CARPLAY.md](CARPLAY.md). Whether the templates it currently uses are permitted for that
+entitlement is unverified, so "complete" here means "compiles and is wired", not
+"validated".
+
+## What still needs the actual car
+
+Unchanged from the first audit and not reducible by more code: a device run against a
+real adapter is the only way to learn what the 2026 Hyperion ECU actually exposes. Until
+then every PID beyond the standard set is a hypothesis. Test procedures belong in
+`docs/REAL_CAR_VALIDATION.md` as each hardware-dependent feature lands.

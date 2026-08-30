@@ -385,3 +385,291 @@ first thing in "Next up".
   states in the brief — armed, foreground, recording, route analysis — has not been
   walked through against real iOS behaviour.
 - **Phase 3 onwards.** The Hyperion pivot proper, product UX, CarPlay and polish.
+
+---
+
+# Hyperion Alpha audit — P0 pass
+
+A second audit, carried out at `115e7ef` against the Hyperion Alpha brief. Every item
+below was checked against the code before anything was changed, and each records how it
+was verified. Where the brief's premise turned out to be wrong, that is recorded too.
+
+Same verification environment as the first audit, and it has not improved: Windows, no
+Swift toolchain, no Xcode, no iOS SDK. Nothing here was compiled locally. CI is the only
+compiler this project has, so "verified" below means `swiftcheck` locally plus the four
+CI jobs on push. A green `swiftcheck` is still not a green build.
+
+## Summary
+
+| # | Item | Classification |
+|---|---|---|
+| P0-1 | Logging abstraction / cross-platform compile | **NOT APPLICABLE** |
+| P0-2 | Telemetry flush is fire-and-forget | **CONFIRMED** |
+| P0-3 | Chunk numbering overwrites existing chunks | **CONFIRMED** |
+| P0-4 | Journal / open-trip reconciliation | **CONFIRMED** |
+| P0-5 | LocationService state model | **CONFIRMED** |
+| P0-6 | Automatic detection reuses a stale GPS fix | **CONFIRMED** |
+| P0-7 | Unexpected BLE disconnect never reconnects | **CONFIRMED** |
+| — | Reconnect mechanics once triggered | **ALREADY FIXED** (`ddc7dcc`) |
+| P0-7b | Transport ready before notifications confirmed | **CONFIRMED** |
+| P0-7c | Pairing screen lists every BLE device | **CONFIRMED** |
+| P0-8 | SensorGate accepts impossible values | **CONFIRMED** |
+| P0-9 | Persistence versioning | **CONFIRMED** |
+| P0-10 | Simulator contaminates real data | **CONFIRMED** |
+
+Nine confirmed, one not applicable, one already fixed.
+
+## P0-1 — Logging abstraction · NOT APPLICABLE
+
+The brief said to treat the repository as broken and not to proceed. It is not broken:
+CI is green on all four jobs at `115e7ef`.
+
+`PrivacyLog.logger(_:)` is declared inside `#if canImport(os)`
+(`Core/PrivacyLog.swift:16-20`) and its 13 call sites are unguarded, so on a platform
+without `os` this would be a compile error rather than a silent no-op. But
+`Package.swift` declares only `.iOS(.v17)` and `.macOS(.v13)`, both of which ship `os`,
+and CI has no Linux job. This is a portability gap against a platform the product does
+not target, not a live defect.
+
+Two related claims in the brief were checked and hold up: no privacy-sensitive value is
+logged (identifiers go through `redactedIdentifier`, document numbers through
+`redactedDocumentNumber`, coordinates through `coarse` at roughly 1 km), and logging is
+not noisy — every call sits in an error branch, never in the 1 Hz sample loop.
+
+Deferred deliberately. A faithful no-op shim has to reimplement the `privacy:` string
+interpolation from `os` to keep call sites unchanged, which is real work in service of a
+platform nobody ships. Recorded here so the decision is visible rather than forgotten.
+
+## P0-2 — Telemetry flush is fire-and-forget · CONFIRMED
+
+`DriveSessionCoordinator.checkpoint(force:now:)` clears the buffer on the line after it
+queues the write:
+
+```
+455  TelemetryFileStore.shared.appendChunk(samples: pendingSamples, ...)
+458  pendingSamples.removeAll()
+```
+
+`TelemetryFileStore.appendChunk` (`Persistence/FileStores.swift:60-63`) returns `Void`
+and drops the journal's `Bool` on the floor across a `queue.async` hop, so the caller
+cannot learn that a write failed. `queue.async` only enqueues, so at line 458 the write
+has not necessarily started. `flushTelemetry(for:)` (`:462-469`) has the same shape via
+`finalise`.
+
+Consequence: a failed write, or termination in the window between enqueue and execution,
+loses the samples with no copy retained anywhere.
+
+Flush triggers today are the 1 Hz drive loop gated to 20 s, scene phase leaving
+`.active`, and trip end. There is no flush on OBD connection change and none on memory
+warning.
+
+## P0-3 — Chunk numbering · CONFIRMED · fixed in this pass
+
+`appendChunk` named files from `contentsOfDirectory(atPath:).count + 1`. Those agree
+only while the sequence has no gaps, and a gap is what a removed or unreadable chunk
+leaves behind. With `chunk-000001` and `chunk-000003` on disk the count is two, the next
+name is `chunk-000003`, and `write(to:options:[.atomic])` replaces it.
+
+The comment above the line claimed a repeat was harmless. That is true of read ordering
+— `journalledSamples` merges by timestamp — and says nothing about the overwrite.
+
+Now one past the highest sequence present. Compaction was checked and does not depend on
+contiguous numbering: `finalise` reads through `journalledSamples` and `merge`, which
+sort by timestamp. Filename order only breaks ties between samples sharing a timestamp,
+so zero-padded sortable names are retained rather than moving to UUIDs.
+
+## P0-4 — Journal / open-trip reconciliation · CONFIRMED
+
+Of the three cases the brief names, two are handled and the third is not.
+
+- Open trip + journal — handled. `recoverInterruptedTrips()` finalises and compacts.
+- Open trip + no journal — handled, degrades cleanly to an empty recovery.
+- Journal + no open trip — **unhandled.** Nothing enumerates journal directories and
+  diffs them against known trip IDs, so orphans accumulate for the life of the install.
+
+Two aggravating details. `TelemetryFileStore.interruptedTrips()` already exists and its
+doc comment says it is read at launch alongside the interrupted drives in the database —
+it has zero production call sites and is reached only by tests. And
+`recoverInterruptedTrips()` runs only for the *selected* vehicle, so recovery for any
+other vehicle waits until that vehicle is selected.
+
+Retention will never clean orphans up: `deleteCompacted(olderThan:)` filters
+`pathExtension == "dlts"` on the compacted layer and documents that it leaves journalled
+chunks alone by design.
+
+Salvage is mechanically easy and worth doing rather than deleting blind: journal
+directories are named `<vehicleUUID>-<tripUUID>` and `parseIdentifiers` recovers both
+IDs from the path alone.
+
+## P0-5 — LocationService state model · CONFIRMED, and worse than described
+
+`beginUpdates(fidelity:)` guards on `authorization.allowsTracking` and returns before
+assigning `fidelity` or `isTracking`, so a request made while `.notDetermined` leaves no
+trace. `locationManagerDidChangeAuthorization` then replays only when `isTracking` is
+already true — which it never is, because the guard is what prevented it being set. The
+request is lost permanently.
+
+Worse than the brief assumed: the first call at launch is `start(fidelity: .idle)`, so
+when permission is granted after launch, even significant-change monitoring never
+starts, `location.latest` stays `nil`, and no drive can be detected at all.
+
+`isTracking` is one Boolean doing duty as both "tracking was wanted" and "tracking is
+running", and `fidelity` is only assigned on the success path, so it does not reliably
+record what was requested either.
+
+`.notDetermined`, `.denied` and `.restricted` are handled identically — silent early
+return, no stored intent.
+
+Separately, `automaticDetectionStatus` is computed from the settings flag and
+authorization only, never from `isTracking`, so the UI reports automatic detection as
+"Active" in exactly the state where it cannot operate.
+
+There are no tests for this state machine.
+
+## P0-6 — Stale GPS fix · CONFIRMED
+
+`resolvedSpeedKmh` is asymmetric: the OBD branch checks
+`telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)`, and the GPS branch checks
+only `isUsableForRouting`, which inspects horizontal accuracy and never the timestamp.
+
+`LocationService.latest` is replaced only when `didUpdateLocations` fires, while the
+drive loop ticks at a fixed 1 Hz. The arming check is
+`now.timeIntervalSince(since) >= startSustainSeconds` — wall clock, evaluated per tick.
+So one stale fix with an elevated speed, re-read for twelve consecutive ticks, promotes
+`.arming` to `.recording` because time passed, not because movement continued.
+
+Adapter presence and engine-running are not used to raise confidence. `engineRunning`
+acts only as a veto when explicitly `false`; when `nil`, auto-start proceeds on GPS
+speed alone. Motion data is not passed to `TripRecorder` at all.
+
+Existing tests always build a fresh `GeoPoint` whose timestamp equals `now`, so the
+missing freshness check is untested.
+
+## P0-7 — Unexpected BLE disconnect · CONFIRMED
+
+`didDisconnectPeripheral` fails a *pending* request with `.connectionLost`, but the poll
+loop sleeps 250 ms between reads, so the ordinary drop happens with nothing in flight.
+Then `failPendingRequest` and `completeConnection` are both no-ops and the only durable
+effect is `isReady = false`.
+
+The next `send()` fails its `isReady` guard and throws `.notConnected`.
+`OBDSession.sendRaw` updates `state` only for `.connectionLost`, so the session keeps
+reporting `.ready`. And the single reconnect trigger,
+`OBDConnectionManager.swift:222`, is gated on `.connectionLost` too.
+
+Net effect: for the most likely kind of disconnect, supervised reconnect never starts.
+The app re-fails every 250 ms forever, logging, while the UI still claims a live link.
+
+There is no transport-level connection-state event stream — `OBDTransport` exposes only
+`connect`, `disconnect`, `send`, and everything above it infers liveness from request
+outcomes.
+
+### Reconnect mechanics · ALREADY FIXED (`ddc7dcc`)
+
+Once triggered, the existing machinery is sound and was left alone: the drive continues
+phone-only, disconnect and reconnect are recorded as trip events, the trip ID survives,
+the adapter is reinitialised and capabilities rediscovered rather than reused, polling
+resumes, overlapping reconnect loops are guarded, and backoff is 1, 2, 5, 10, 30 seconds
+holding at 30 indefinitely. Its correctness is entirely conditional on P0-7, because
+today it is never reached for an idle drop.
+
+## P0-7b — Ready before notifications confirmed · CONFIRMED
+
+`adopt(characteristics:)` calls `setNotifyValue(true, for:)` and then, in the same
+function, sets `isReady = true` and resolves the connect continuation.
+`didUpdateNotificationStateFor` is not implemented anywhere in the repository, so
+nothing ever checks `characteristic.isNotifying`. A command can therefore be written
+before the subscription is active, and the reply arrives as a notification the OS is not
+yet delivering — a silent stall until the 2 s timeout.
+
+## P0-7c — Pairing screen lists every BLE device · CONFIRMED
+
+`BluetoothAdapterScanner.centralManager(_:didDiscover:...)` appends every advertising
+peripheral to `discoveries`, sorted by signal strength, with no filter at all. The
+`looksLikeAdapter` heuristic does exist but is a `private static func` on
+`BluetoothOBDTransport`, used only by that type's own auto-connect path and structurally
+unreachable from the scanner. `candidateServiceUUIDs` is declared and never referenced by
+anything — scanning passes `withServices: nil`.
+
+`adopt` accepts any peripheral exposing one notify-or-indicate and one
+write-or-writeWithoutResponse characteristic on any service. No service UUID check, no
+name check, and no ELM handshake before the transport reports success; `ATZ` validation
+happens a layer up in `OBDSession.start()`, after the transport has already declared
+itself ready, so a non-adapter is caught only as a generic timeout.
+
+## P0-8 — SensorGate accepts impossible values · CONFIRMED
+
+`SensorGate.offer` increments `consecutiveRejections` for every rejection and then
+yields once it reaches three **without consulting the reason**:
+
+```
+192  consecutiveRejections += 1
+194  guard consecutiveRejections >= rejectionsBeforeYielding else { return nil }
+196  lastAccepted = (value, timestamp)
+```
+
+Traced concretely: coolant with a plausible range of -40...215, offered 500 three times,
+is accepted on the third call and thereafter reported as a measured 500 with no rejection
+note. Every subsequent 500 is accepted outright, because its rate of change against the
+previous 500 is zero.
+
+The same path accepts a known sensor default — three reports of 0 rpm while running
+become a believed measurement of an engine turning at zero.
+
+Only an impossible rate of change has any business yielding; that is the case the design
+comment and the existing tests actually justify. An out-of-range value and a sensor
+default must never yield, and no existing test drives either past the third offer, so the
+bug is entirely uncovered.
+
+Verified separately, against the code rather than the test that asserts it: the gate
+never substitutes zero for a rejected reading.
+
+Metadata gap behind the bug: a gated value is a `Provenanced<Double>` carrying value,
+provenance, timestamp and a free-text `basis`. There is no unit and no quality enum, so
+there is no structured way to mark a value as suspect — once accepted it is
+indistinguishable from a clean reading.
+
+## P0-9 — Persistence versioning · CONFIRMED
+
+Nine `@Model` types each store a `payload: Data` produced by `StoredCoding`
+(`Persistence/StoredModels.swift:231-243`), a bare `JSONEncoder`/`JSONDecoder` pair.
+There is no version of any kind: `payloadVersion`, `schemaVersion`, `VersionedSchema`
+and `SchemaMigrationPlan` return zero hits across `App/` and `Sources/`.
+
+Eight load sites discard failures with `compactMap { try? $0.value() }`
+(`GarageStore.swift:44, 118, 151, 170, 190, 201, 223, 305`). A decode failure does not
+throw, log, or quarantine — the row silently stops existing.
+
+`DriveLayerSchema.models` carries the comment "bump the version and add a migration
+stage rather than editing an existing record shape". There is no version to bump. The
+comment describes a discipline that was never implemented.
+
+Consequence: rename one field on `Trip`, ship it, and every user's history disappears on
+next launch with nothing surfaced.
+
+## P0-10 — Simulator contaminates real data · CONFIRMED
+
+`DataProvenance` has no `.simulated` case, so simulated readings are stamped as measured
+exactly like a real adapter's.
+
+The path is unguarded end to end. `OBDConnectionManager` builds `SimulatedOBDTransport`
+and wraps it in the same `OBDSession`; `Source.isSimulated` exists but is used only for
+display and never consulted by `pollDueParameters`.
+`DriveSessionCoordinator.tick()` takes telemetry on connection state alone,
+`collectTelemetry` accumulates baseline aggregates with no source check, and
+`flushPending()` merges them into the persisted store through the same
+`store.merge(aggregates:vehicleID:)` used for real drives.
+
+Trips recorded under the simulator go through the same `store.save(trip:)` and carry no
+flag — `Trip` has no `isSimulated` field — so they are later read back mixed
+indistinguishably with real drives.
+
+The toggle ships in Release. The simulator `Toggle` in `AdapterSetupView` has no
+`#if DEBUG` and is reachable from Settings, Vehicle and Onboarding; the Debug Center
+scenario picker is equally ungated.
+
+Existing scenarios: `normalHighway`, `coldStart`, `hotCityTraffic`, `mountainClimb`,
+`longDescent`, `lowBattery`, `highCoolantTemperature`, `highEngineLoad`,
+`fuelRunningLow`, `dpfWarning`, `sensorUnavailable`, `linkDropAndRecover`,
+`invalidResponses`. Note that `dpfWarning` is diesel product logic and is in scope for
+removal under P1.
