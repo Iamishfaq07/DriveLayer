@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap and fast, and the only job that can run without a Mac. Catches bracket
+  # balance, unknown types, bad member references, import policy violations, the
+  # read-only banned-API rules, and project.yml paths that no longer exist.
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Run swiftcheck
+        run: python3 Tools/swiftcheck.py Sources Tests App
+
+  # The important one: this is where DriveLayerCore is actually compiled and the
+  # test suite actually runs. The core is Foundation-only precisely so this job
+  # needs no Xcode project, no simulator and no code signing.
+  core-tests:
+    name: Core tests (swift test)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: swift --version
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --parallel
+
+  # Compiles the app and the widget extension for the simulator. Code signing is
+  # disabled because CI has no team and does not need one to prove it builds.
+  app-build:
+    name: App build (iOS Simulator)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project DriveLayer.xcodeproj \
+            -scheme DriveLayer \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
