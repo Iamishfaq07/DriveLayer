@@ -2,10 +2,17 @@
 
 Maintained as work proceeds.
 
-**CI is green.** All three jobs pass: static checks, `swift build` + `swift test`
-(326 tests across 41 suites) on macOS, and an Xcode build of the app and widget
-extension for the iOS Simulator. What remains unverified needs hardware — see
-"Known gaps" at the end of this file.
+**CI is green at `a2a0399`.** All four jobs pass: static checks, `swift build` +
+`swift test` (397 tests across 46 suites) on macOS, the app test target (21 tests
+across 3 suites), and an Xcode build of the app and widget extension for the iOS
+Simulator. What remains unverified needs hardware — see "Known gaps" at the end of
+this file.
+
+Counts are taken from the sources, because `swift test --parallel` prints no total on
+the way past. A green claim here is only ever as fresh as the commit named beside it:
+this paragraph still read "CI is green" while the three most recent runs on PR #5 were
+failing, one of them on a switch that did not compile. Hence the commit is now named,
+and the claim should be re-dated or deleted rather than left to drift.
 
 The project is now scoped to **one vehicle**: a 2026 Tata Harrier with the 1.5-litre
 Hyperion turbo GDI petrol engine. The architecture stays multi-vehicle — every part of
@@ -228,19 +235,31 @@ lived there. The approach taken so far has been to move the awkward logic *into*
 core where `swift test` reaches it: `TelemetryJournal`, `AltitudeFusion`,
 `ReconnectPolicy`, `AutomaticDetectionStatus`. That is genuine coverage of the
 behaviour, but it is not coverage of the call sites. A real app test target, run via
-`xcodebuild test` on the macOS runner, is still needed.
+`xcodebuild test` on the macOS runner, was still needed — it landed in `c0c88c1` as the
+`app-tests` job, and now carries 21 tests across 3 suites.
 
-### Phase 3 — Hyperion pivot · **Not started**
+### Phase 3 — Hyperion pivot · **Data layer started, nothing wired**
 
 The profile is already correct in substance: Tata Harrier, petrol, Hyperion TGDi 1.5,
 turbocharged, `.experimental` tier, no invented power or torque figures, and an empty
 manufacturer-specific PID table. The model year was 2025 in the profile and 2026 in its
 own id; reconciled to 2026.
 
+Landed so far, under `Sources/DriveLayerCore/Hyperion/`: the warm-up model
+(`EngineThermalModel`), a sensor-plausibility gate (`SensorGate`), heat-soak
+intelligence (`HeatSoakAnalyser`), and `InsightConfidence` as the qualitative rung
+above the numeric confidence `DriveInsight` already ranks by.
+
+All four are covered by tests and **none of them has a caller.** Nothing in the app
+target, the coordinator, the view models, the widgets or CarPlay consumes them, and
+`EngineTemperatureRule` in `InsightRules.swift` still does its own coolant
+thresholding independently of `EngineThermalModel`. This is tested library code that
+no driver can currently reach, so the next step is wiring rather than more analysers.
+
 What remains: renaming and generalising `Diesel/` into an aftertreatment abstraction
-plus a petrol-focused Hyperion Guardian, the warm-up model, heat-soak intelligence,
-turbo/air intelligence from MAP − BARO clearly labelled as an estimate, fuel-trim
-baselines, GDI fuel-rail data where standardised, and battery/start intelligence.
+plus a petrol-focused Hyperion Guardian, turbo/air intelligence from MAP − BARO
+clearly labelled as an estimate, fuel-trim baselines, GDI fuel-rail data where
+standardised, and battery/start intelligence.
 
 ### Phase 4 — Route intelligence · **Mostly done, earlier**
 
@@ -254,8 +273,10 @@ Ask Harrier, then the accessibility, battery and long-drive soak work.
 
 ## Next up
 
-1. An app test target, so the call sites fixed in phases 1 and 2 are covered rather
-   than only the logic beneath them.
+1. Wire the Hyperion analysers to something a driver can see. `DriveSessionCoordinator`
+   already calls the sibling `DieselGuardian.assess`, and `InsightEngine.standardRules`
+   is how every other per-metric assessment reaches the driver — those are the two
+   established seams, and neither is used yet.
 2. Decode monitor-status PID 0x01 structurally (MIL state, DTC count) to finish the
    event-driven diagnostics refresh.
 3. Begin the Hyperion Guardian rename, as one coherent change rather than a
