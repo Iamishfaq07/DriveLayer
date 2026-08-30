@@ -2,13 +2,16 @@ import SwiftUI
 
 struct TripsListView: View {
 
+    /// Bound from `RootView` so the last-drive widget can push a drive onto this tab.
+    @Binding var path: [DeepLink]
+
     @Environment(AppEnvironment.self) private var environment
     @State private var trips: [Trip] = []
 
     private var formatter: DisplayFormatter { environment.formatter }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if environment.selectedVehicle == nil {
                     DLUnavailableState(reason: .noVehicleSelected)
@@ -36,6 +39,7 @@ struct TripsListView: View {
             .navigationTitle("Trips")
             .task { reload() }
             .refreshable { reload() }
+            .deepLinkDestinations()
         }
     }
 
@@ -126,5 +130,35 @@ private struct TripRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+
+/// The most recent drive, resolved when it is opened.
+///
+/// This is what `drivelayer://last-drive` lands on. Looking the drive up now rather
+/// than carrying an identifier in the URL means a drive finished since the widget
+/// last refreshed opens the new one, and a deleted drive cannot leave the link
+/// pointing at nothing.
+struct LatestTripView: View {
+
+    @Environment(AppEnvironment.self) private var environment
+
+    private var latest: Trip? {
+        environment.selectedVehicle.flatMap {
+            environment.store.trips(vehicleID: $0.id, limit: 1).first
+        }
+    }
+
+    var body: some View {
+        if let latest {
+            TripDetailView(trip: latest)
+        } else if environment.selectedVehicle == nil {
+            DLUnavailableState(reason: .noVehicleSelected)
+        } else {
+            DLEmptyState(symbol: "map",
+                         title: "No drives yet",
+                         message: "DriveLayer records a drive automatically once you're moving, or you can start one from the Drive tab.")
+        }
     }
 }

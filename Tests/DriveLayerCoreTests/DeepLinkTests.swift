@@ -35,6 +35,15 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertNil(DeepLink(url: other))
     }
 
+    /// The last-drive link names an intent, not a record. Carrying a trip UUID in a
+    /// URL would let a widget open a drive that has since been deleted, or a stale
+    /// one when a newer drive has finished.
+    func testLastDriveLinkCarriesNoIdentifier() throws {
+        XCTAssertEqual(DeepLink.lastTrip.url.absoluteString, "drivelayer://last-drive")
+        let url = try XCTUnwrap(URL(string: "drivelayer://last-drive"))
+        XCTAssertEqual(DeepLink(url: url), .lastTrip)
+    }
+
     func testBareSchemeIsRejected() throws {
         let url = try XCTUnwrap(URL(string: "drivelayer://"))
         XCTAssertNil(DeepLink(url: url))

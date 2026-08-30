@@ -18,6 +18,7 @@ extension DeepLink {
         case .today: return Route(tab: .today, path: [])
         case .drive: return Route(tab: .drive, path: [])
         case .trips: return Route(tab: .trips, path: [])
+        case .lastTrip: return Route(tab: .trips, path: [.lastTrip])
         case .vehicle: return Route(tab: .vehicle, path: [])
         case .insights: return Route(tab: .today, path: [.insights])
         case .fuel: return Route(tab: .vehicle, path: [.fuel])
@@ -40,6 +41,7 @@ struct DeepLinkDestination: View {
 
     var body: some View {
         switch link {
+        case .lastTrip: LatestTripView()
         case .insights: InsightsView()
         case .fuel: FuelView()
         case .maintenance: MaintenanceView()

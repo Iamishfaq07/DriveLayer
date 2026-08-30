@@ -309,8 +309,9 @@ struct LastTripWidgetView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        // The snapshot carries no trip identifier, so this opens the list rather
-        // than pretending it can open the drive it is describing.
-        .widgetURL(DeepLink.trips.url)
+        // Opens the drive itself. The link names "my last drive" rather than an
+        // identifier, so the app resolves which one that is as it opens — a drive
+        // finished since this widget refreshed opens the new one, not a stale one.
+        .widgetURL(entry.snapshot.lastTripDistanceKm == nil ? DeepLink.trips.url : DeepLink.lastTrip.url)
     }
 }

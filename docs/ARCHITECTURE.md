@@ -154,9 +154,13 @@ following a widget arrive by the same route.
 
 Widgets link to what they are actually showing: the fuel widget to fuel, the service
 widget to maintenance, the status widget to the insight it is displaying or to the
-vehicle screen when there is none. The last-drive widget opens the trip list rather
-than the drive it describes, because the widget snapshot carries no trip identifier —
-a link that guessed at one would sometimes open the wrong drive.
+vehicle screen when there is none, and the last-drive widget to the drive itself.
+
+That last one names an intent — `drivelayer://last-drive` — rather than carrying a
+trip identifier, and the app resolves which drive that is as it opens. A UUID in the
+URL could point at a drive the driver has since deleted, or at a stale one when a
+newer drive finished after the widget last refreshed. Naming the intent has neither
+failure mode.
 
 ## Deployment target
 
