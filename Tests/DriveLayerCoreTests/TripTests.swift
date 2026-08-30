@@ -115,12 +115,33 @@ final class TripRecorderTests: XCTestCase {
         var time = start.addingTimeInterval(10)
         _ = recorder.update(location: point(12.90, 77.60, speedKmh: 50, at: time), telemetry: running, now: time)
 
+        // Stamp the engine-off reading at the moment it is read: a reading from a
+        // minute ago is stale, and the recorder correctly treats stale as unknown
+        // rather than as "off".
+        time = time.addingTimeInterval(60)
         var off = VehicleTelemetry(updatedAt: time)
         off.set(.engineRPM, value: 0, at: time)
-        time = time.addingTimeInterval(60)
         let outcome = recorder.update(location: point(12.90, 77.60, speedKmh: 0, at: time), telemetry: off, now: time)
         guard case let .ended(trip) = outcome else { return XCTFail("expected the drive to end, got \(outcome)") }
         XCTAssertEqual(trip.endReason, .engineOff)
+    }
+
+    func testStaleEngineDataDoesNotEndTheDrive() {
+        var recorder = drivingRecorder()
+        _ = recorder.startManually(now: start)
+
+        var running = VehicleTelemetry(updatedAt: start)
+        running.set(.engineRPM, value: 1_800, at: start)
+        var time = start.addingTimeInterval(10)
+        _ = recorder.update(location: point(12.90, 77.60, speedKmh: 50, at: time), telemetry: running, now: time)
+
+        // The adapter stopped reporting rather than reporting zero. Unknown is not
+        // off, so the drive must keep recording.
+        time = time.addingTimeInterval(60)
+        let outcome = recorder.update(location: point(12.90, 77.60, speedKmh: 40, at: time),
+                                      telemetry: running, now: time)
+        XCTAssertEqual(outcome, .updated)
+        XCTAssertTrue(recorder.isRecording)
     }
 
     func testAdapterDropIsRecordedAsAnEventAndTheDriveContinues() {

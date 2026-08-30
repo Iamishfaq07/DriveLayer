@@ -98,7 +98,8 @@ struct WeatherKitProvider: WeatherProviding {
                         condition: condition(from: hour.condition),
                         temperatureC: hour.temperature.converted(to: .celsius).value,
                         apparentTemperatureC: hour.apparentTemperature.converted(to: .celsius).value,
-                        precipitationIntensityMillimetresPerHour: hour.precipitationIntensity.converted(to: .millimetersPerHour).value,
+                        // Millimetres falling within this hour is, by definition, mm/h.
+                        precipitationIntensityMillimetresPerHour: hour.precipitationAmount.converted(to: .millimeters).value,
                         precipitationChance: hour.precipitationChance,
                         windSpeedKmh: hour.wind.speed.converted(to: .kilometersPerHour).value,
                         windGustKmh: hour.wind.gust?.converted(to: .kilometersPerHour).value,

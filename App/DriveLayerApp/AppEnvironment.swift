@@ -29,7 +29,10 @@ final class AppEnvironment {
     /// reference, so the app records itself here at construction. Nothing else uses it.
     private(set) static var active: AppEnvironment?
 
-    init(container: ModelContainer, settings: AppSettings = AppSettings()) {
+    /// `settings` is optional rather than defaulted because a default argument is
+    /// evaluated in a nonisolated context, and `AppSettings` is main-actor isolated.
+    init(container: ModelContainer, settings: AppSettings? = nil) {
+        let settings = settings ?? AppSettings()
         self.settings = settings
         self.store = GarageStore(context: ModelContext(container))
         self.obd = OBDConnectionManager()

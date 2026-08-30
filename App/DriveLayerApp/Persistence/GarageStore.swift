@@ -86,6 +86,9 @@ final class GarageStore {
     /// Removes a vehicle and everything belonging to it. Used by "delete all data for
     /// this vehicle" in privacy settings, so it must genuinely leave nothing behind.
     func delete(vehicleID: UUID) {
+        // StoredDocument.vehicleID is optional, so the predicate needs an optional to
+        // compare against rather than relying on promotion.
+        let optionalVehicleID: UUID? = vehicleID
         perform("Deleting the vehicle") {
             try context.delete(model: StoredTrip.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredFuelEntry.self, where: #Predicate { $0.vehicleID == vehicleID })
@@ -93,7 +96,7 @@ final class GarageStore {
             try context.delete(model: StoredServiceRecord.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredRoadEvent.self, where: #Predicate { $0.vehicleID == vehicleID })
-            try context.delete(model: StoredDocument.self, where: #Predicate { $0.vehicleID == vehicleID })
+            try context.delete(model: StoredDocument.self, where: #Predicate { $0.vehicleID == optionalVehicleID })
             try context.delete(model: StoredVehicle.self, where: #Predicate { $0.id == vehicleID })
         }
         TelemetryFileStore.shared.deleteAll(forVehicle: vehicleID)
