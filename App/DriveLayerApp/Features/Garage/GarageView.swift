@@ -288,7 +288,8 @@ struct EditVehicleView: View {
                              unit: "L",
                              reason: "Not recorded")
             ValueOrReasonRow(label: "Source",
-                             value: vehicle.tankCapacitySource(profile: profile).label)
+                             value: vehicle.tankCapacitySource(profile: profile)?.label,
+                             reason: "No profile")
             TextField("Override (litres)", text: $tankOverride)
                 .keyboardType(.decimalPad)
         } header: {
@@ -299,8 +300,10 @@ struct EditVehicleView: View {
     }
 
     private var tankFooter: String {
-        let source = vehicle.tankCapacitySource(profile: profile)
         let base = "Range is estimated from this and your fuel level, so a wrong figure becomes a wrong distance. Leave the override empty to use the profile's own value."
+        // No profile means no figure to describe the provenance of, so the warning
+        // about generic defaults would be describing nothing.
+        guard let source = vehicle.tankCapacitySource(profile: profile) else { return base }
         return source.isVehicleSpecific
             ? base
             : "This is a generic default, not a published figure for your exact vehicle. " + base
