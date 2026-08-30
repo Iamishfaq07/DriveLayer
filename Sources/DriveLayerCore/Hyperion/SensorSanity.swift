@@ -25,6 +25,29 @@ enum SensorSanity {
         /// The value a sensor reports when it has nothing, which is not a measurement.
         case sensorDefault
 
+        /// Whether a reading rejected for this reason may eventually be accepted as the
+        /// new reality once it persists.
+        ///
+        /// Only an impossible rate of change may. That is the case the gate was built
+        /// for: if the engine genuinely is at 4,000 rpm, a filter that keeps insisting
+        /// otherwise has stopped filtering and started being wrong.
+        ///
+        /// The rest must never yield, and the distinction is not stylistic. A value
+        /// outside the plausible range is outside what the sensor can physically report,
+        /// so repetition is evidence of a broken sensor rather than of a hot engine --
+        /// a coolant reading of 500 C repeated ten times is still not 500 C. A sensor
+        /// default is by definition what the sensor sends when it has nothing to say,
+        /// and a broken sensor says it indefinitely. A stale reading is one that has
+        /// stopped changing, which is a reason to keep flagging it rather than to start
+        /// trusting it. Accepting any of the three would hand a driver a fabricated
+        /// number carrying full measured provenance and no way to tell.
+        var mayYieldToPersistence: Bool {
+            switch self {
+            case .impossibleRateOfChange: return true
+            case .outsidePlausibleRange, .sensorDefault, .stale: return false
+            }
+        }
+
         var explanation: String {
             switch self {
             case let .outsidePlausibleRange(low, high):
@@ -170,9 +193,11 @@ struct SensorGate: Sendable, Equatable {
     /// Offers a reading. Returns the value to use, or nil when it should be ignored.
     ///
     /// After `rejectionsBeforeYielding` consecutive rejections the gate accepts the
-    /// reading and re-baselines. Refusing forever would be worse than a spike: if the
-    /// engine genuinely is at 4,000 rpm, a gate that keeps saying otherwise has stopped
-    /// being a filter and started being wrong.
+    /// reading and re-baselines -- but only when the reason permits it. Refusing a
+    /// genuine step change forever would be worse than a spike, and refusing an
+    /// impossible value forever is the entire point of the gate. See
+    /// `SensorSanity.Rejection.mayYieldToPersistence`, which used not to be consulted
+    /// here: three repeats of anything at all were enough to be believed.
     @discardableResult
     mutating func offer(_ value: Double, at timestamp: Date, engineRunning: Bool = true) -> Double? {
         let verdict = SensorSanity.check(value,
@@ -189,8 +214,15 @@ struct SensorGate: Sendable, Equatable {
             lastRejection = nil
             return accepted
         case let .rejected(reason):
-            consecutiveRejections += 1
             lastRejection = reason
+            guard reason.mayYieldToPersistence else {
+                // Counted, but capped rather than climbing forever: this reading is never
+                // going to be accepted, and the gate holds its last good value and keeps
+                // reporting why. A broken sensor repeating itself is still broken.
+                consecutiveRejections = min(consecutiveRejections + 1, rejectionsBeforeYielding)
+                return nil
+            }
+            consecutiveRejections += 1
             guard consecutiveRejections >= rejectionsBeforeYielding else { return nil }
             // Persistent, so it is not a spike. Accept it and start again from here.
             lastAccepted = (value, timestamp)

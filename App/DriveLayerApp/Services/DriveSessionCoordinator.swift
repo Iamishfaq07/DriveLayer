@@ -21,6 +21,12 @@ final class DriveSessionCoordinator {
     private(set) var health: VehicleHealthReport?
     private(set) var fuelStatus: FuelStatus = .unknown
     private(set) var dieselAssessment: DieselUsageAssessment?
+    /// What DriveLayer makes of the Hyperion engine right now.
+    ///
+    /// The analysers behind this were written and wired to nothing: EngineThermalModel
+    /// and HeatSoakAnalyser were tested and reachable from no production code at all.
+    /// This property is the seam that gets them to a driver.
+    private(set) var hyperion: HyperionAssessment = .unavailable
     private(set) var gradient: GradientEstimate?
     private(set) var terrainFeature: TerrainFeature?
     private(set) var currentWeather: WeatherSnapshot?
@@ -36,6 +42,7 @@ final class DriveSessionCoordinator {
     var profile: VehicleProfile?
 
     private let store: GarageStore
+    private let telemetryStore: TelemetryWriting
     private let obd: OBDConnectionManager
     private let location: LocationService
     private let motion: MotionService
@@ -51,6 +58,18 @@ final class DriveSessionCoordinator {
     private let insightEngine = InsightEngine()
     private var downsampler = TelemetryDownsampler()
     private var pendingSamples: [TelemetrySample] = []
+    /// Samples retained because a write failed, capped so a disk that keeps refusing
+    /// cannot grow this without limit. Five thousand is roughly eighty minutes at 1 Hz.
+    private static let maximumPendingSamples = 5_000
+    private var telemetryWriteFailures = 0
+    private(set) var droppedTelemetrySamples = 0
+
+    /// Live telemetry not yet on disk.
+    ///
+    /// The Debug Center shows this because it is exactly the amount at risk if iOS
+    /// terminates the app in the next moment, and because a number that stops falling is
+    /// how a failing write announces itself.
+    var pendingTelemetryCount: Int { pendingSamples.count }
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
 
@@ -60,6 +79,10 @@ final class DriveSessionCoordinator {
 
     /// Last adapter state the loop saw, so a change can be recorded on the drive.
     private var lastAdapterConnected: Bool?
+
+    /// Highest intake-over-ambient difference seen recently, so a fall can be reported as
+    /// cooling rather than as a smaller number. Decays rather than latching.
+    private var peakIntakeDeltaC: Double?
 
     private var driveLoop: Task<Void, Never>?
     /// When the live drive was last written to disk. See `checkpoint(force:now:)`.
@@ -98,8 +121,10 @@ final class DriveSessionCoordinator {
          motion: MotionService,
          settings: AppSettings,
          weather: WeatherProviding,
-         route: RouteProviding) {
+         route: RouteProviding,
+         telemetryStore: TelemetryWriting = TelemetryFileStore.shared) {
         self.store = store
+        self.telemetryStore = telemetryStore
         self.obd = obd
         self.location = location
         self.motion = motion
@@ -155,10 +180,10 @@ final class DriveSessionCoordinator {
             if let recovered = TripRecovery.finalise(open, lastKnownActivityAt: lastActivity) {
                 store.save(trip: recovered)
                 // The drive's chunks outlived the process that was writing them.
-                TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: recovered.id)
+                telemetryStore.finalise(vehicleID: vehicle.id, tripID: recovered.id, appending: [])
             } else {
                 store.delete(tripID: open.id)
-                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: open.id)
+                telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: open.id)
             }
         }
     }
@@ -212,7 +237,7 @@ final class DriveSessionCoordinator {
         pendingSamples.removeAll()
         recorder = vehicle.map { makeRecorder(for: $0) }
         if let vehicle {
-            TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
+            telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
         }
         LiveActivityController.shared.end()
     }
@@ -220,7 +245,8 @@ final class DriveSessionCoordinator {
     /// What automatic drive detection is actually doing, permissions included.
     var automaticDetectionStatus: AutomaticDetectionStatus {
         AutomaticDetectionStatus.resolve(isEnabled: settings.automaticTripDetection,
-                                         authorization: location.authorization)
+                                         authorization: location.authorization,
+                                         isReceivingUpdates: location.isMonitoring)
     }
 
     func startDriveManually() {
@@ -248,6 +274,10 @@ final class DriveSessionCoordinator {
         if lastAdapterConnected != adapterConnected {
             if lastAdapterConnected != nil {
                 recorder.noteAdapterConnectionChange(connected: adapterConnected, at: now)
+                // The stream either just stopped or just resumed. Either way this is a
+                // natural boundary and a cheap moment to get what we have onto disk,
+                // rather than waiting out the rest of the interval.
+                checkpoint(force: true, now: now)
             }
             lastAdapterConnected = adapterConnected
         }
@@ -390,7 +420,7 @@ final class DriveSessionCoordinator {
             // next launch would "recover" a drive the recorder deliberately threw away.
             store.delete(tripID: discardedID)
             if let vehicle {
-                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
+                telemetryStore.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
             }
             pendingSamples.removeAll()
             motion.clearImpacts()
@@ -413,10 +443,64 @@ final class DriveSessionCoordinator {
 
     // MARK: - Telemetry and baselines
 
+    /// A telemetry reading as a `Provenanced` value, or unavailable when it is missing,
+    /// stale, or there is no adapter.
+    ///
+    /// The provenance is carried through rather than assumed, which is what keeps a
+    /// simulated reading from arriving at the Hyperion screen looking measured.
+    private func provenancedReading(_ metric: VehicleMetric,
+                                    freshWithin seconds: TimeInterval,
+                                    now: Date) -> Provenanced<Double> {
+        guard obd.isConnected,
+              let entry = obd.telemetry.entry(metric),
+              now.timeIntervalSince(entry.timestamp) <= seconds else { return .unavailable() }
+        return Provenanced(value: entry.value,
+                           provenance: entry.provenance,
+                           timestamp: entry.timestamp)
+    }
+
+    private func assessHyperion(profile: VehicleProfile?, now: Date) -> HyperionAssessment {
+        guard obd.isConnected else {
+            peakIntakeDeltaC = nil
+            return .unavailable
+        }
+
+        let intake = provenancedReading(.intakeAirTemperatureC, freshWithin: 30, now: now)
+        let ambient = obd.telemetry.value(.ambientAirTemperatureC, freshWithin: 300, now: now)
+        if let intakeValue = intake.value, let ambient {
+            peakIntakeDeltaC = HeatSoakAnalyser.updatedPeak(current: peakIntakeDeltaC,
+                                                           delta: intakeValue - ambient)
+        }
+
+        return HyperionGuardian.assess(
+            coolantC: provenancedReading(.coolantTemperatureC, freshWithin: 60, now: now),
+            oilC: provenancedReading(.oilTemperatureC, freshWithin: 60, now: now),
+            intakeC: intake,
+            ambientC: ambient,
+            speedKmh: obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
+            idleSeconds: currentTrip?.idleDurationSeconds,
+            runtimeSeconds: currentTrip.map { now.timeIntervalSince($0.startedAt) },
+            peakIntakeDeltaC: peakIntakeDeltaC,
+            // Warm-up history is not stored per drive yet; that is its own P1 item, and
+            // passing an empty history simply means no comparison is offered rather than
+            // a comparison being invented.
+            warmUpHistory: [],
+            intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
+            profile: profile)
+    }
+
     private func collectTelemetry(_ telemetry: VehicleTelemetry, at now: Date) {
         if let sample = downsampler.consider(telemetry, at: now) {
             pendingSamples.append(sample)
         }
+
+        // Simulated telemetry stops here. It may be journalled, shown live and used to
+        // exercise the insight rules -- that is what the simulator is for -- but it must
+        // never teach DriveLayer what is normal for a real Harrier. Nothing downstream
+        // could tell the difference afterwards: aggregates are merged into the same store
+        // by the same call, and a baseline learned from a scenario would quietly skew
+        // every comparison made against the actual car.
+        guard !telemetry.containsSimulatedData else { return }
 
         // Baseline observations are filed under the conditions they were taken in.
         let context = BaselineEngine.context(speedKmh: telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
@@ -452,19 +536,45 @@ final class DriveSessionCoordinator {
         lastCheckpointAt = now
         store.save(trip: trip)
         guard let vehicle, !pendingSamples.isEmpty else { return }
-        TelemetryFileStore.shared.appendChunk(samples: pendingSamples,
-                                             vehicleID: vehicle.id,
-                                             tripID: trip.id)
+        // Cleared only once the samples are actually on disk. The buffer used to be
+        // emptied on the line after a fire-and-forget `queue.async`, which meant a failed
+        // write -- or termination before the queued block ran -- lost them silently.
+        guard telemetryStore.appendChunk(samples: pendingSamples,
+                                         vehicleID: vehicle.id,
+                                         tripID: trip.id) else {
+            telemetryWriteFailures += 1
+            capPendingSamples()
+            return
+        }
+        telemetryWriteFailures = 0
         pendingSamples.removeAll()
+    }
+
+    /// Drops the oldest retained samples once the buffer passes its cap.
+    ///
+    /// Reached only when writes keep failing, where the choice is between losing the
+    /// oldest telemetry and growing until the app is killed for it. Counted rather than
+    /// silent, so the Debug Center can say it happened.
+    private func capPendingSamples() {
+        let excess = pendingSamples.count - Self.maximumPendingSamples
+        guard excess > 0 else { return }
+        pendingSamples.removeFirst(excess)
+        droppedTelemetrySamples += excess
     }
 
     /// Compacts a finished drive's chunks into its single file.
     private func flushTelemetry(for trip: Trip) {
         guard let vehicle else { return }
-        TelemetryFileStore.shared.finalise(vehicleID: vehicle.id,
-                                           tripID: trip.id,
-                                           appending: pendingSamples)
-        pendingSamples.removeAll()
+        if telemetryStore.finalise(vehicleID: vehicle.id,
+                                   tripID: trip.id,
+                                   appending: pendingSamples) {
+            pendingSamples.removeAll()
+        } else {
+            // Kept for the next attempt. A drive whose compaction failed is still
+            // recoverable from its chunks at the next launch.
+            telemetryWriteFailures += 1
+            capPendingSamples()
+        }
         flushPending()
         reloadBaselines()
     }
@@ -506,6 +616,7 @@ final class DriveSessionCoordinator {
                                              tankCapacityLitres: vehicle.tankCapacityLitres(profile: profile),
                                              economy: economy)
         dieselAssessment = DieselGuardian.assess(trips: recentTrips, profile: profile, now: now)
+        hyperion = assessHyperion(profile: profile, now: now)
 
         let context = InsightContext(now: now,
                                      vehicle: vehicle,

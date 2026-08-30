@@ -58,11 +58,7 @@ struct TelemetryJournal: Sendable {
         let directory = journalURL(vehicleID: vehicleID, tripID: tripID)
         do {
             try createDirectoryIfNeeded(directory)
-            // Numbered from what is already there. Ordering on read comes from the
-            // sample timestamps rather than these names, so a gap or a repeat in the
-            // sequence is harmless.
-            let existing = (try? fileManager.contentsOfDirectory(atPath: directory.path))?.count ?? 0
-            let url = directory.appendingPathComponent(String(format: "chunk-%06d.dlts", existing + 1))
+            let url = directory.appendingPathComponent(nextChunkName(in: directory))
             let data = try TelemetrySeriesCodec.encode(samples)
             try data.write(to: url, options: [.atomic])
             return true
@@ -70,6 +66,36 @@ struct TelemetryJournal: Sendable {
             PrivacyLog.logger(.persistence).error("Could not append a telemetry chunk")
             return false
         }
+    }
+
+    /// The filename for the next chunk in a journal directory.
+    ///
+    /// One past the highest sequence already present -- deliberately not one past the
+    /// *count*. Those two agree only while the sequence has no gaps, and a gap is
+    /// exactly what a removed or unreadable chunk leaves behind. With `chunk-000001`
+    /// and `chunk-000003` on disk, counting yields three again, and because the write
+    /// below is atomic it replaces `chunk-000003` wholesale: twenty seconds of a drive
+    /// nobody has read yet, gone. The previous comment here argued a repeat was
+    /// harmless, which was true of read *ordering* and not of overwriting.
+    ///
+    /// Names stay zero-padded and sortable because `journalledSamples` reads in
+    /// filename order, and that order decides which of two samples sharing a timestamp
+    /// survives the merge.
+    private func nextChunkName(in directory: URL) -> String {
+        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
+        let highest = names.compactMap { Self.chunkSequence(of: $0) }.max() ?? 0
+        return String(format: "chunk-%06d.dlts", highest + 1)
+    }
+
+    /// The sequence number in a name like `chunk-000007.dlts`, or nil for anything else
+    /// that happens to be sitting in the directory.
+    static func chunkSequence(of name: String) -> Int? {
+        let prefix = "chunk-"
+        let suffix = ".dlts"
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return nil }
+        let digits = name.dropFirst(prefix.count).dropLast(suffix.count)
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isNumber }) else { return nil }
+        return Int(digits)
     }
 
     private func createDirectoryIfNeeded(_ url: URL) throws {
@@ -169,6 +195,20 @@ struct TelemetryJournal: Sendable {
     // MARK: - Recovery
 
     /// Drives with chunks still on disk: the ones interrupted before compaction.
+    /// When a journal was last written to, or nil if it is not there.
+    ///
+    /// Reconciliation needs this to tell a journal that outlived its process from one
+    /// being written right now. Deleting the latter would throw away the drive in progress.
+    func journalLastWrite(vehicleID: UUID, tripID: UUID) -> Date? {
+        let directory = journalURL(vehicleID: vehicleID, tripID: tripID)
+        let files = (try? fileManager.contentsOfDirectory(at: directory,
+                                                         includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let dates = files.compactMap { url -> Date? in
+            try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        return dates.max()
+    }
+
     func interruptedTrips() -> [(vehicleID: UUID, tripID: UUID)] {
         let entries = (try? fileManager.contentsOfDirectory(atPath: journalRoot.path)) ?? []
         return entries.compactMap(Self.parseIdentifiers).sorted { $0.tripID.uuidString < $1.tripID.uuidString }

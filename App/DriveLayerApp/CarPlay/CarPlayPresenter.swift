@@ -84,8 +84,11 @@ final class CarPlayPresenter {
             items.append(CPListItem(text: terrain.headline, detailText: terrain.detail()))
         }
 
-        if let diesel = drive.dieselAssessment, diesel.isApplicable {
-            items.append(CPListItem(text: "Diesel", detailText: diesel.headline))
+        // Replaces a diesel row that could never appear on this car: DieselGuardian
+        // returns notApplicable for a petrol profile, so the condition was dead for the
+        // only vehicle DriveLayer supports.
+        if !drive.hyperion.isSilent {
+            items.append(CPListItem(text: "Hyperion", detailText: drive.hyperion.overall.label))
         }
 
         return CPListSection(items: items, header: environment.selectedVehicle?.nickname ?? "DriveLayer", sectionIndexTitle: nil)

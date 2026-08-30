@@ -92,7 +92,7 @@ enum InsightConfidence: String, Codable, CaseIterable, Sendable, Comparable {
     /// The most confidence a given kind of data can support.
     static func ceiling(for provenance: DataProvenance) -> InsightConfidence {
         switch provenance {
-        case .measured, .userEntered: return .high
+        case .measured, .userEntered, .simulated: return .high
         case .estimated: return .medium
         case .inferred: return .medium
         case .unavailable: return .low

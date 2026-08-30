@@ -44,6 +44,52 @@ final class TripRecorderTests: XCTestCase {
         XCTAssertTrue(recorder.isRecording)
     }
 
+    /// One stale fix used to be enough to start a drive. The coordinator ticks once a
+    /// second whether or not CoreLocation produced a new fix, `LocationService.latest`
+    /// holds the last one indefinitely, and the arming check measures wall clock -- so a
+    /// parked phone still holding a fix that once read 50 km/h would arm and then record.
+    func testAStaleFixDoesNotStartADriveHoweverLongItIsReused() {
+        var recorder = drivingRecorder()
+        let stale = point(12.90, 77.60, speedKmh: 50, at: start)
+
+        // The same fix, re-read every second for a minute: five times the sustain window,
+        // with its timestamp never moving.
+        for second in 0...60 {
+            _ = recorder.update(location: stale,
+                                telemetry: nil,
+                                now: start.addingTimeInterval(Double(second)))
+        }
+
+        XCTAssertFalse(recorder.isRecording, "time passing is not evidence of movement")
+    }
+
+    func testFixesThatKeepArrivingFreshStillStartADrive() {
+        var recorder = drivingRecorder()
+        for second in 0...15 {
+            let now = start.addingTimeInterval(Double(second))
+            _ = recorder.update(location: point(12.90 + Double(second) * 0.001, 77.60,
+                                               speedKmh: 45, at: now),
+                                telemetry: nil,
+                                now: now)
+        }
+        XCTAssertTrue(recorder.isRecording, "a car that really is moving must still be detected")
+    }
+
+    /// The adapter branch was always freshness-checked, so a live OBD speed carries a
+    /// drive even when GPS has gone quiet.
+    func testAFreshAdapterSpeedStartsADriveWithoutAFreshFix() {
+        var recorder = drivingRecorder()
+        let stale = point(12.90, 77.60, speedKmh: 0, at: start)
+        for second in 0...15 {
+            let now = start.addingTimeInterval(Double(second))
+            var telemetry = VehicleTelemetry(updatedAt: now)
+            telemetry.set(.vehicleSpeedKmh, value: 45, at: now)
+            telemetry.set(.engineRPM, value: 1_800, at: now)
+            _ = recorder.update(location: stale, telemetry: telemetry, now: now)
+        }
+        XCTAssertTrue(recorder.isRecording)
+    }
+
     func testManualStartTwiceDoesNotCreateASecondTrip() {
         var recorder = drivingRecorder()
         guard case let .started(firstID) = recorder.startManually(now: start) else {

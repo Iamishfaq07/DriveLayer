@@ -176,6 +176,47 @@ final class AppEnvironment {
         TelemetryFileStore.shared.deleteCompacted(olderThan: cutoff)
     }
 
+    /// Reconciles telemetry journals on disk against the drives the database knows about.
+    ///
+    /// Three cases exist and only two were handled. An open drive with a journal recovers,
+    /// and an open drive without one recovers empty -- both through
+    /// `recoverInterruptedTrips()`. The third, a journal whose drive is not in the database
+    /// at all, was handled nowhere: nothing enumerated the journal directory and compared
+    /// it against known drives, so an orphan stayed on disk for the life of the install.
+    /// Retention could never collect it either, since `deleteCompacted(olderThan:)`
+    /// deliberately leaves journalled chunks alone.
+    ///
+    /// `TelemetryFileStore.interruptedTrips()` already existed for exactly this, and its
+    /// own comment said it was read at launch. It had no production caller.
+    ///
+    /// Orphans are removed rather than salvaged. A journal names a vehicle and a drive in
+    /// its directory name and carries no other metadata, so there is nothing to rebuild a
+    /// missing drive row *from*: no start time, no route, no distance. Inventing one to
+    /// hang the telemetry on would put a fabricated drive in a driver's history, which is
+    /// worse than losing telemetry for a drive that is already gone.
+    ///
+    /// - Parameter grace: how recently a journal may have been written and still be left
+    ///   alone. A journal being written *now* belongs to a live drive, and the point of
+    ///   the grace period is that this can never delete one.
+    func reconcileTelemetryJournals(now: Date = Date(), grace: TimeInterval = 48 * 3_600) {
+        for journal in TelemetryFileStore.shared.interruptedTrips() {
+            let outcome = JournalReconciliation.outcome(
+                hasTripRow: store.tripRowExists(id: journal.tripID),
+                lastWrite: TelemetryFileStore.shared.journalLastWrite(vehicleID: journal.vehicleID,
+                                                                     tripID: journal.tripID),
+                now: now,
+                grace: grace)
+            guard outcome == .discard else { continue }
+
+            TelemetryFileStore.shared.discardJournal(vehicleID: journal.vehicleID,
+                                                     tripID: journal.tripID)
+            reconciledOrphanJournals += 1
+        }
+    }
+
+    /// Orphan journals removed since launch. Shown in the Debug Center.
+    private(set) var reconciledOrphanJournals = 0
+
     /// Discards what DriveLayer has learned about the car, on request.
     ///
     /// Separate from telemetry retention on purpose: a driver clearing disk space should

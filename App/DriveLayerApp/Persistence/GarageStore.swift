@@ -18,6 +18,11 @@ final class GarageStore {
         self.context = context
     }
 
+    /// Rows this build could not decode. Shown in the Debug Center: a non-zero value
+    /// means a migration is missing, not that the data is gone.
+    private(set) var undecodablePayloads = 0
+
+
     private func perform(_ description: String, _ work: () throws -> Void) {
         do {
             try work()
@@ -26,6 +31,34 @@ final class GarageStore {
             lastError = "\(description) failed: \(error.localizedDescription)"
             PrivacyLog.logger(.persistence).error("\(description, privacy: .public) failed")
         }
+    }
+
+    /// Decodes stored rows, counting whatever will not decode instead of discarding it.
+    ///
+    /// Every load site used to be `compactMap { try? $0.value() }`, which turned an
+    /// unreadable payload into a row that had simply never existed: no throw, no log,
+    /// nothing for the driver or for us to notice. A payload this build cannot read is
+    /// far more likely to be one a *later* build can -- a migration not yet written, or
+    /// data from a newer version -- so the row is left on disk untouched and the failure
+    /// is surfaced instead.
+    private func decodeAll<Record, Value>(_ records: [Record],
+                                          description: String,
+                                          _ transform: (Record) throws -> Value) -> [Value] {
+        var values: [Value] = []
+        var failures = 0
+        for record in records {
+            do {
+                values.append(try transform(record))
+            } catch {
+                failures += 1
+            }
+        }
+        if failures > 0 {
+            undecodablePayloads += failures
+            lastError = "\(description): \(failures) saved item(s) could not be read and were kept for a later version."
+            PrivacyLog.logger(.persistence).error("\(description, privacy: .public): \(failures, privacy: .public) undecodable payloads")
+        }
+        return values
     }
 
     private func fetch<T: PersistentModel>(_ descriptor: FetchDescriptor<T>, description: String) -> [T] {
@@ -41,7 +74,8 @@ final class GarageStore {
 
     func vehicles() -> [Vehicle] {
         let descriptor = FetchDescriptor<StoredVehicle>(sortBy: [SortDescriptor(\.createdAt)])
-        return fetch(descriptor, description: "Loading vehicles").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading vehicles"),
+                         description: "Loading vehicles") { try $0.value() }
     }
 
     func primaryVehicle() -> Vehicle? {
@@ -115,7 +149,8 @@ final class GarageStore {
             sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
         )
         descriptor.fetchLimit = limit
-        return fetch(descriptor, description: "Loading drives").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading drives"),
+                         description: "Loading drives") { try $0.value() }
     }
 
     func save(trip: Trip) {
@@ -137,6 +172,26 @@ final class GarageStore {
     }
 
     /// Drives that were still open when the app was last terminated.
+    /// A drive by id, whichever vehicle it belongs to.
+    ///
+    /// Reconciliation starts from journal directories on disk, which name a trip id and
+    /// nothing else, so the vehicle-scoped lookups are the wrong shape for it.
+    func trip(id: UUID) -> Trip? {
+        let descriptor = FetchDescriptor<StoredTrip>(predicate: #Predicate { $0.id == id })
+        return decodeAll(fetch(descriptor, description: "Loading a drive"),
+                         description: "Loading a drive") { try $0.value() }.first
+    }
+
+    /// Whether a drive row exists at all, decodable or not.
+    ///
+    /// Deliberately distinct from `trip(id:)`. A row whose payload this build cannot read
+    /// is emphatically not an orphan, and treating it as one would delete the telemetry
+    /// belonging to a drive a later build can still recover.
+    func tripRowExists(id: UUID) -> Bool {
+        let descriptor = FetchDescriptor<StoredTrip>(predicate: #Predicate { $0.id == id })
+        return !fetch(descriptor, description: "Checking for a drive").isEmpty
+    }
+
     func openTrips(vehicleID: UUID) -> [Trip] {
         trips(vehicleID: vehicleID).filter { !$0.isComplete }
     }
@@ -148,7 +203,8 @@ final class GarageStore {
             predicate: #Predicate { $0.vehicleID == vehicleID },
             sortBy: [SortDescriptor(\.date, order: .reverse)]
         )
-        return fetch(descriptor, description: "Loading fuel entries").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading fuel entries"),
+                         description: "Loading fuel entries") { try $0.value() }
     }
 
     func add(fuelEntry: FuelEntry) {
@@ -167,7 +223,8 @@ final class GarageStore {
 
     func maintenanceItems(vehicleID: UUID) -> [MaintenanceItem] {
         let descriptor = FetchDescriptor<StoredMaintenanceItem>(predicate: #Predicate { $0.vehicleID == vehicleID })
-        return fetch(descriptor, description: "Loading maintenance").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading maintenance"),
+                         description: "Loading maintenance") { try $0.value() }
     }
 
     func save(maintenanceItem: MaintenanceItem) {
@@ -187,7 +244,8 @@ final class GarageStore {
             predicate: #Predicate { $0.vehicleID == vehicleID },
             sortBy: [SortDescriptor(\.date, order: .reverse)]
         )
-        return fetch(descriptor, description: "Loading service history").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading service history"),
+                         description: "Loading service history") { try $0.value() }
     }
 
     func add(serviceRecord: ServiceRecord) {
@@ -198,7 +256,8 @@ final class GarageStore {
 
     func documents(vehicleID: UUID?) -> [DocumentRecord] {
         let descriptor = FetchDescriptor<StoredDocument>(sortBy: [SortDescriptor(\.expiryDate)])
-        let all = fetch(descriptor, description: "Loading documents").compactMap { try? $0.value() }
+        let all = decodeAll(fetch(descriptor, description: "Loading documents"),
+                            description: "Loading documents") { try $0.value() }
         guard let vehicleID else { return all }
         return all.filter { $0.vehicleID == vehicleID || $0.vehicleID == nil }
     }
@@ -302,7 +361,8 @@ final class GarageStore {
             predicate: #Predicate { $0.vehicleID == vehicleID },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
-        return fetch(descriptor, description: "Loading road events").compactMap { try? $0.value() }
+        return decodeAll(fetch(descriptor, description: "Loading road events"),
+                         description: "Loading road events") { try $0.value() }
     }
 
     // MARK: - Privacy controls

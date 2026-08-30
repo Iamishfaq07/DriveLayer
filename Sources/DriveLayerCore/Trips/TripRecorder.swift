@@ -3,6 +3,15 @@ import Foundation
 struct TripRecorderConfiguration: Sendable, Equatable {
     var startSpeedKmh: Double = 8
     var startSustainSeconds: TimeInterval = 12
+    /// How old a GPS fix may be and still count as evidence the car is moving.
+    ///
+    /// The drive loop ticks once a second whether or not CoreLocation produced a new
+    /// fix, so without this a single stale fix reporting motorway speed is re-read every
+    /// tick and `startSustainSeconds` elapses on wall clock alone. Five seconds is
+    /// roughly two dropped fixes at the distance filters used here: long enough not to
+    /// discard ordinary jitter, short enough that a parked phone cannot talk itself into
+    /// a drive.
+    var locationFreshnessSeconds: TimeInterval = 5
     var stopSpeedKmh: Double = 3
     var stopSustainSeconds: TimeInterval = 150
     /// How long the engine may be off before the drive is considered over.
@@ -267,11 +276,19 @@ struct TripRecorder: Sendable {
     }
 
     /// Vehicle speed is preferred when the adapter reports it; GPS is the fallback.
+    ///
+    /// Both branches are now checked for freshness. The telemetry branch always was; the
+    /// GPS branch checked accuracy and never age, which is the more dangerous omission of
+    /// the two, because `isUsableForRouting` happily passes a pin-sharp fix from ten
+    /// minutes ago.
     private func resolvedSpeedKmh(location: GeoPoint?, telemetry: VehicleTelemetry?, now: Date) -> Double? {
         if let obdSpeed = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now) {
             return obdSpeed
         }
         guard let location, location.isUsableForRouting else { return nil }
+        guard now.timeIntervalSince(location.timestamp) <= configuration.locationFreshnessSeconds else {
+            return nil
+        }
         guard let metresPerSecond = location.speedMetresPerSecond else { return nil }
         return Convert.kmh(fromMetresPerSecond: metresPerSecond)
     }

@@ -2,9 +2,9 @@
 
 Maintained as work proceeds.
 
-**CI is green at `a2a0399`.** All four jobs pass: static checks, `swift build` +
-`swift test` (397 tests across 46 suites) on macOS, the app test target (21 tests
-across 3 suites), and an Xcode build of the app and widget extension for the iOS
+**CI is green at `e2b3ed3`.** All four jobs pass: static checks, `swift build` +
+`swift test` (441 tests across 49 suites) on macOS, the app test target (40 tests
+across 6 suites), and an Xcode build of the app and widget extension for the iOS
 Simulator. What remains unverified needs hardware — see "Known gaps" at the end of
 this file.
 
@@ -179,7 +179,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 418 tests passing in CI at `062386e`: 397 via `swift test`, 21 in the app target. |
+| **Test execution** | 481 tests passing in CI at `e2b3ed3`: 441 via `swift test`, 40 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
@@ -299,3 +299,137 @@ Crowdsourced road quality with real corroboration · camera-assisted road
 intelligence · multiple vehicle intelligence packs · optional cloud sync (opt-in,
 encrypted, never a requirement) · fleet and family garage · broader manufacturer
 integrations where they can be done legitimately.
+
+---
+
+# Hyperion Alpha
+
+The target for this pass. Audited at `115e7ef`; findings and their classifications are in
+[AUDIT.md](AUDIT.md) under "Hyperion Alpha audit — P0 pass".
+
+Statuses here are deliberately narrow. **IMPLEMENTED** means production code calls it,
+data reaches it, a user-facing surface shows its result, and tests cover the logic.
+Anything short of that is **PARTIAL**, **MOCK ONLY**, **BLOCKED ON HARDWARE** or
+**BLOCKED ON ENTITLEMENT**. A type existing and being unit-tested is not implemented —
+that mistake is what left four Hyperion analysers with no callers.
+
+## P0 — reliability and truthfulness
+
+| # | Item | Status |
+|---|---|---|
+| P0-1 | Logging abstraction | NOT APPLICABLE — iOS and macOS both ship `os`; no Linux target |
+| P0-2 | Confirmed telemetry persistence | IMPLEMENTED — writes report their result, samples retained on failure |
+| P0-3 | Chunk numbering | IMPLEMENTED — highest sequence + 1, regression tested |
+| P0-4 | Journal reconciliation, orphan handling | IMPLEMENTED — orphans collected at launch, live drives protected |
+| P0-5 | Location requested-vs-actual state | IMPLEMENTED — replay needs a device, see V-3 |
+| P0-6 | GPS freshness before auto-start | IMPLEMENTED — a stale fix cannot start a drive |
+| P0-7 | Reconnect on any unexpected drop | IMPLEMENTED — BLOCKED ON HARDWARE to verify, see V-2 |
+| P0-7b | Wait for `isNotifying` before ready | IMPLEMENTED — BLOCKED ON HARDWARE to verify, see V-1 |
+| P0-7c | Filter the pairing screen | IMPLEMENTED — classifier tested; ELM handshake before storing still outstanding |
+| P0-8 | SensorGate must never yield to impossible values | IMPLEMENTED — yielding gated by reason |
+| P0-9 | Payload versioning and migration | IMPLEMENTED — versioned envelope, unreadable rows kept |
+| P0-10 | Simulator isolation | IMPLEMENTED — separate provenance, barred from baselines and from release builds |
+
+P0 is complete: nine fixed, one not applicable. Every fix is green across the four CI
+jobs. Three carry a caveat that CI cannot remove, and they are written up as procedures in
+[REAL_CAR_VALIDATION.md](REAL_CAR_VALIDATION.md) rather than quietly called done:
+
+- **P0-5** — the tests cover intent surviving a refused start. CoreLocation in a test
+  bundle reports `.notDetermined` and grants nothing, so the replay when permission
+  arrives needs a device (V-3).
+- **P0-7 / P0-7b** — a disconnect with nothing in flight, and a notification subscription
+  confirming late, both need a real peripheral (V-1, V-2).
+- **P0-7c** — the pairing screen now filters, and the classifier is tested. Validating an
+  adapter with an `ATZ`/`ATI` handshake *before* storing it is not done; today a
+  non-adapter is still caught only as a timeout one layer up.
+
+Two follow-ups fall out of this pass rather than being in the brief:
+
+- `Trip.isSimulated`, so a simulated drive is distinguishable in history rather than only
+  in its telemetry provenance. Deliberately deferred: it is a payload shape change, and it
+  needs the version-2 migration that P0-9 has now made possible. Adding it before P0-9
+  would have silently deleted every stored drive, which is exactly the bug P0-9 fixes.
+- A directly asserted test for the coordinator retaining samples when a write fails. The
+  seam exists and the store contract is tested on both outcomes, but driving the
+  coordinator's own retain branch needs the simulator-driven soak harness from P3.
+
+Two P0 findings are worth calling out because they are worse than the brief assumed.
+
+**P0-5** is not only about losing a high-fidelity mode. The first call at launch is
+`start(fidelity: .idle)`, so if permission is granted after launch, nothing starts at all
+and no drive can ever be detected — while `automaticDetectionStatus` still reports
+"Active", because it reads the settings flag and authorization and never asks whether
+tracking is actually running.
+
+**P0-7** means the reconnect supervisor landed in `ddc7dcc` is, in practice, unreachable
+for the ordinary disconnect. The poll loop idles 250 ms between reads, so a drop usually
+happens with no request in flight, and the resulting `.notConnected` fails the
+`.connectionLost` guard that is the only thing that starts a reconnect.
+
+## P1 — Hyperion intelligence
+
+| # | Item | Status |
+|---|---|---|
+| P1-11 | Remove diesel product logic | ALREADY FIXED — unreachable on a petrol profile; see below |
+| P1-12 | Wire `HyperionGuardian` end to end | IMPLEMENTED — 2 of 6 areas assessed |
+| P1-13 | Structured fuel system status (`01 03`) | Not started |
+| P1-14 | Fuel trim intelligence | Not started · BLOCKED ON HARDWARE for the PIDs (V-4) |
+| P1-15 | Turbo and air, estimated boost | Not started · BLOCKED ON HARDWARE (V-6) |
+| P1-16 | Warm-up intelligence and history | PARTIAL — model wired, per-drive history not stored |
+| P1-17 | Heat soak | IMPLEMENTED — live through `HyperionGuardian` |
+| P1-18 | Battery trends | Not started |
+| P1-19 | MIL and DTC events | Not started |
+| P1-20 | Aftertreatment | Not started |
+| P1-21 | Expanded contextual baselines | Not started |
+
+**P1-11 was verified rather than assumed, and the brief's premise did not hold.** No
+diesel content can reach a Harrier owner: `DieselGuardian.assess` guards on
+`profile.fuelType.isDiesel` and returns `.notApplicable` for petrol, and all three
+consumers gate on `isApplicable` — `DieselUsageRule` returns nothing,
+`VehicleHealthEvaluator.dieselUsage` returns nil so no "Diesel usage" system is built, and
+the CarPlay row was never appended. It is dead code for this product rather than a
+user-facing defect, so it was left in place rather than half-migrated: renaming `Diesel/`
+into an aftertreatment abstraction is the coherent change the brief itself asks for, and
+doing it in passing is how a half-migration happens. The one dead diesel surface removed
+was the CarPlay row, because Hyperion now occupies that line.
+
+**P1-12 closed the finding this whole pass opened with.** `EngineThermalModel`,
+`HeatSoakAnalyser`, `SensorGate` and `InsightConfidence` were tested and called by nothing.
+`HyperionGuardian` assembles them, the coordinator publishes an assessment each analysis
+pass, and CarPlay reads it.
+
+Two areas of six are assessed — engine state and air/turbo. The other four are present and
+each carries the reason it is not assessed yet, which is deliberate: an unbuilt area that
+says so is more useful than an absent one, and unassessed areas are excluded from the
+overall status because `unknown` outranks `normal` in a roll-up and would otherwise report
+the whole engine as unknown while every reading says it is fine.
+
+Air and turbo is the intake-versus-ambient story only. Estimated boost from MAP minus
+barometric pressure joins it when V-5 confirms those PIDs on the real car, and not before.
+
+## P2 — trip and route quality
+
+Not started: phone-only trip statistics, fused trip elevation, a production route terrain
+provider, Context Ahead, the trip event timeline, repeated-route comparison, the fuel
+journal.
+
+Route terrain is **MOCK ONLY**: `MockElevationProvider` is the sole conformer of
+`ElevationProviding` anywhere in the tree, so terrain-ahead has no live data source.
+
+## P3 — surfaces and scale
+
+Not started: CarPlay cleanup, Ask Harrier, the real-car capability scan, PID Lab, Debug
+Center expansion, performance and soak testing, UI polish.
+
+CarPlay is **BLOCKED ON ENTITLEMENT** and stays that way: the code is complete and needs
+Apple's driving-task entitlement plus the two edits documented in
+[CARPLAY.md](CARPLAY.md). Whether the templates it currently uses are permitted for that
+entitlement is unverified, so "complete" here means "compiles and is wired", not
+"validated".
+
+## What still needs the actual car
+
+Unchanged from the first audit and not reducible by more code: a device run against a
+real adapter is the only way to learn what the 2026 Hyperion ECU actually exposes. Until
+then every PID beyond the standard set is a hypothesis. Test procedures belong in
+`docs/REAL_CAR_VALIDATION.md` as each hardware-dependent feature lands.
