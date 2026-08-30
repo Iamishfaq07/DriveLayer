@@ -371,7 +371,10 @@ final class HyperionPIDTests: XCTestCase {
     }
 
     func testCatalystTemperature() throws {
-        XCTAssertEqual(try decode(0x3C, [0x1A, 0xF8]), 651.2, accuracy: 0.1)
+        // J1979 scales this one by 10 with a 40 degree offset: 0x1AF8 is 6904, so
+        // 6904 / 10 - 40 = 650.4. Spelled out because the first version of this test
+        // asserted 651.2, which is the answer for 0x1B00, and the formula was blamed.
+        XCTAssertEqual(try decode(0x3C, [0x1A, 0xF8]), 650.4, accuracy: 0.1)
     }
 
     func testEthanolPercentage() throws {
