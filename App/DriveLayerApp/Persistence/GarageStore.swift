@@ -239,7 +239,20 @@ final class GarageStore {
         }
     }
 
-    /// Drops baseline history older than the retention window the driver chose.
+    /// Discards everything learned about one vehicle, on explicit request.
+    ///
+    /// Not called by retention. See `AppEnvironment.applyRetentionPolicy()`.
+    func deleteBaselines(vehicleID: UUID) {
+        perform("Resetting learned baselines") {
+            try context.delete(model: StoredBaselineAggregate.self,
+                               where: #Predicate { $0.vehicleID == vehicleID })
+        }
+    }
+
+    /// Drops baseline history older than a cutoff.
+    ///
+    /// Retained for the Debug Center and for a future explicit control; deliberately
+    /// **not** wired to the telemetry retention setting any more.
     func pruneBaselines(olderThan cutoff: Date) {
         perform("Pruning baselines") {
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.dayStart < cutoff })

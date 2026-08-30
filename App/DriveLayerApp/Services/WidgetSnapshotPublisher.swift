@@ -46,6 +46,19 @@ enum WidgetSnapshotPublisher {
         store(snapshot)
     }
 
+    /// Clears the snapshot and reloads the widgets.
+    ///
+    /// `lastPublished` has to be reset too: it exists to suppress redundant reloads, and
+    /// leaving it set would suppress the very next publish if that publish happened to
+    /// be equal to what was on screen before the deletion.
+    static func clear() {
+        lastPublished = nil
+        WidgetSnapshotStore.clear()
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
     private static func store(_ snapshot: WidgetSnapshot) {
         // `generatedAt` always differs, so it is excluded from the comparison.
         if var previous = lastPublished {

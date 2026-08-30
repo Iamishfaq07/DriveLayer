@@ -103,6 +103,17 @@ enum WidgetSnapshotStore {
         }
     }
 
+    /// Removes the snapshot entirely.
+    ///
+    /// Called when the data behind the widgets is deleted. The snapshot lives in the
+    /// shared app group, so without this it outlives the deletion and the widgets keep
+    /// showing a deleted vehicle's name, health and range - the one thing "delete all
+    /// data" must not leave sitting on the home screen.
+    static func clear() {
+        guard let fileURL else { return }
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
     static func read() -> WidgetSnapshot? {
         guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return nil }
         let decoder = JSONDecoder()

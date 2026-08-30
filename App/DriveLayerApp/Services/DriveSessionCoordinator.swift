@@ -164,7 +164,11 @@ final class DriveSessionCoordinator {
 
     func start() {
         guard driveLoop == nil else { return }
-        location.start(fidelity: settings.automaticTripDetection ? .idle : .driving)
+        // Idle regardless of the automatic-detection setting. This used to ask for
+        // full driving accuracy when automatic detection was *off*, which is the
+        // opposite of the intent: nothing is being recorded yet either way, and
+        // setDriveScreenVisible and the recorder raise it when there is a reason to.
+        location.start(fidelity: .idle)
         motion.start()
         driveLoop = Task { [weak self] in
             while !Task.isCancelled {
@@ -186,6 +190,34 @@ final class DriveSessionCoordinator {
     func setDriveScreenVisible(_ isVisible: Bool) {
         obd.isForeground = isVisible
         location.start(fidelity: isVisible ? .active : (isRecording ? .driving : .idle))
+    }
+
+    /// Drops the drive in progress without saving it.
+    ///
+    /// Distinct from ending it, which persists. Used when the data underneath is being
+    /// deleted: ending would write the drive back out immediately after the deletion
+    /// removed it, and a checkpoint firing mid-deletion would do the same.
+    func abandonActiveDrive() {
+        guard let trip = recorder?.currentTrip else {
+            isRecording = false
+            currentTrip = nil
+            return
+        }
+        isRecording = false
+        currentTrip = nil
+        lastCheckpointAt = nil
+        pendingSamples.removeAll()
+        recorder = vehicle.map { makeRecorder(for: $0) }
+        if let vehicle {
+            TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: trip.id)
+        }
+        LiveActivityController.shared.end()
+    }
+
+    /// What automatic drive detection is actually doing, permissions included.
+    var automaticDetectionStatus: AutomaticDetectionStatus {
+        AutomaticDetectionStatus.resolve(isEnabled: settings.automaticTripDetection,
+                                         authorization: location.authorization)
     }
 
     func startDriveManually() {
