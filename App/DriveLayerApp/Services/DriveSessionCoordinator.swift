@@ -311,6 +311,13 @@ final class DriveSessionCoordinator {
 
         health = VehicleHealthEvaluator.evaluate(context)
         insights = insightEngine.evaluate(context, existing: force ? [] : insights)
+        WidgetSnapshotPublisher.publish(vehicle: vehicle,
+                                        health: health,
+                                        fuel: fuelStatus,
+                                        nextService: maintenance.first { $0.status != .unknown },
+                                        lastTrip: recentTrips.first(where: \.isComplete),
+                                        headline: InsightEngine.headline(insights),
+                                        isAdapterConnected: obd.isConnected)
         LiveActivityController.shared.update(trip: currentTrip,
                                              insight: InsightEngine.headline(insights),
                                              health: health?.overall,

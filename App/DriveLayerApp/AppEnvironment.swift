@@ -22,6 +22,12 @@ final class AppEnvironment {
     private(set) var vehicles: [Vehicle] = []
     private(set) var selectedVehicleID: UUID?
 
+    /// The running instance.
+    ///
+    /// CarPlay and App Intents arrive on their own scenes with no way to be handed a
+    /// reference, so the app records itself here at construction. Nothing else uses it.
+    private(set) static var active: AppEnvironment?
+
     init(container: ModelContainer, settings: AppSettings = AppSettings()) {
         self.settings = settings
         self.store = GarageStore(context: ModelContext(container))
@@ -35,6 +41,7 @@ final class AppEnvironment {
                                              motion: motion,
                                              settings: settings,
                                              weather: AppEnvironment.makeWeatherProvider(settings: settings))
+        AppEnvironment.active = self
     }
 
     /// The mock provider is only ever used when the driver has explicitly switched on

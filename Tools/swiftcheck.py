@@ -350,7 +350,8 @@ RelativeDateTimeFormatter ISO8601DateFormatter ByteCountFormatter ListFormatter
 FetchDescriptor SortDescriptor PersistentModel ModelActor DefaultHistoryToken
 Type Protocol Predicate PredicateExpression Expression
 ViewBuilder ToolbarContentBuilder ToolbarContent SceneBuilder WidgetBundleBuilder
-Bindable Entry PreviewProvider PreviewModifier
+Bindable Entry PreviewProvider PreviewModifier Context Companion Family
+LocalizedStringResource UIResponder UIWindowScene UISceneDelegate UIResponderStandardEditActions
 CommandsBuilder MenuBuilder AccessibilityRotorContentBuilder TableColumnBuilder
 CBCentralManagerScanOptionAllowDuplicatesKey CBConnectPeripheralOptionNotifyOnDisconnectionKey
 CBAdvertisementDataServiceUUIDsKey CBAdvertisementDataManufacturerDataKey
@@ -512,6 +513,23 @@ def main() -> int:
             for match in pattern.finditer(raw):
                 line = raw.count("\n", 0, match.start()) + 1
                 errors.append(f"{path}:{line}: banned pattern — {reason}")
+
+    # Every path project.yml lists must exist, or a target silently loses files.
+    if os.path.exists("project.yml"):
+        try:
+            import yaml  # type: ignore
+            project = yaml.safe_load(open("project.yml", encoding="utf-8"))
+            for target_name, target in (project.get("targets") or {}).items():
+                for source in target.get("sources") or []:
+                    source_path = source["path"] if isinstance(source, dict) else source
+                    if not os.path.exists(source_path):
+                        errors.append(f"project.yml: target {target_name} lists missing path '{source_path}'")
+                for key in ("info", "entitlements"):
+                    entry = target.get(key)
+                    if isinstance(entry, dict) and not os.path.exists(entry.get("path", "")):
+                        errors.append(f"project.yml: target {target_name} {key} path is missing")
+        except ImportError:
+            warnings.append("project.yml not validated: PyYAML is not installed")
 
     # Leftover markers
     for path, raw in raw_files.items():
