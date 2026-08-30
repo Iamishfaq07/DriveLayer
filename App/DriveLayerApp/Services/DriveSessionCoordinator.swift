@@ -50,6 +50,10 @@ final class DriveSessionCoordinator {
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
 
+    /// Impacts already taken from `MotionService`, so the same jolt is not recorded
+    /// twice as the loop re-reads its rolling buffer.
+    private var consumedImpactIDs: Set<UUID> = []
+
     private var driveLoop: Task<Void, Never>?
     private var lastWeatherFetch: Date?
     private let analysisInterval: TimeInterval = 5
@@ -173,12 +177,38 @@ final class DriveSessionCoordinator {
         if isRecording, let telemetry {
             collectTelemetry(telemetry, at: now)
         }
+        collectRoadImpacts(into: &recorder)
+        self.recorder = recorder
         gradient = gradientCalculator.current
 
         if lastAnalysisAt == nil || now.timeIntervalSince(lastAnalysisAt!) >= analysisInterval {
             refreshAnalysis()
         }
         await refreshWeatherIfNeeded(at: point, now: now)
+    }
+
+    /// Persists impacts the motion service has detected and puts them on the drive.
+    ///
+    /// Only while recording: a jolt with the car parked is the phone being picked up,
+    /// which is exactly the thing `RoadImpactEvent` refuses to call a pothole. Nothing
+    /// is stored when the driver has the feature switched off.
+    private func collectRoadImpacts(into recorder: inout TripRecorder) {
+        guard settings.roadImpactDetectionEnabled, isRecording else { return }
+        let fresh = motion.recentImpacts.filter { !consumedImpactIDs.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+
+        for event in fresh.sorted(by: { $0.timestamp < $1.timestamp }) {
+            consumedImpactIDs.insert(event.id)
+            if let vehicleID = vehicle?.id {
+                store.add(roadEvent: event, vehicleID: vehicleID)
+            }
+            recorder.add(event: event.asTripEvent())
+        }
+
+        // The buffer holds 50; keeping every ID forever would grow without bound on a
+        // long drive, and an ID that has fallen out of the buffer cannot recur.
+        let live = Set(motion.recentImpacts.map(\.id))
+        consumedImpactIDs.formIntersection(live)
     }
 
     private func handle(_ outcome: TripRecorderOutcome, recorder: inout TripRecorder) {
@@ -190,6 +220,10 @@ final class DriveSessionCoordinator {
             downsampler.reset()
             pendingSamples.removeAll()
             gradientCalculator.reset()
+            // The buffer can hold jolts from before the drive — a phone being picked
+            // up and put in a cradle looks exactly like a bad road surface.
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .driving)
             currentTrip = recorder.currentTrip
             LiveActivityController.shared.start(trip: currentTrip,
@@ -212,6 +246,8 @@ final class DriveSessionCoordinator {
             store.save(trip: finished)
             flushTelemetry(for: finished)
             updateOdometer(after: finished)
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .idle)
             LiveActivityController.shared.end()
             refreshAnalysis(force: true)
@@ -219,6 +255,8 @@ final class DriveSessionCoordinator {
             isRecording = false
             currentTrip = nil
             pendingSamples.removeAll()
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .idle)
             LiveActivityController.shared.end()
         }

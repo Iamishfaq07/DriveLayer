@@ -54,6 +54,36 @@ struct RoadImpactEvent: Sendable, Equatable, Identifiable, Codable {
         self.deviceMountingConfidence = deviceMountingConfidence
         self.classification = classification
     }
+
+    /// How this impact appears on a drive.
+    ///
+    /// The wording lives here rather than in a view because it is a product
+    /// judgement, not presentation: DriveLayer cannot tell a bad road surface from a
+    /// phone being knocked, so the note has to say what was measured and the severity
+    /// must never escalate past `watch`. A red mark would be claiming a certainty the
+    /// sensor cannot supply.
+    func asTripEvent(now: Date? = nil) -> TripEvent {
+        TripEvent(kind: .roadImpact,
+                  timestamp: now ?? timestamp,
+                  severity: .watch,
+                  note: note,
+                  latitude: latitude,
+                  longitude: longitude)
+    }
+
+    /// What DriveLayer is willing to say about one jolt.
+    var note: String {
+        var text = String(format: "Sharp vertical movement, about %.1fg.", peakVerticalG)
+        if let speedKmh {
+            text += String(format: " At about %.0f km/h.", speedKmh)
+        }
+        if classification == .unclassified {
+            // The detector already refused to call this a surface irregularity, so
+            // the copy must not imply otherwise.
+            text += " DriveLayer can't tell whether this was the road or the phone moving."
+        }
+        return text
+    }
 }
 
 /// Judges how steadily the device is being held or mounted.

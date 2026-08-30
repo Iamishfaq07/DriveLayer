@@ -251,6 +251,63 @@ final class RoadImpactTests: XCTestCase {
                        ["unclassified", "possibleSurfaceIrregularity"],
                        "DriveLayer must not claim to have identified a pothole")
     }
+
+    // MARK: - How an impact appears on a drive
+
+    private func impact(g: Double = 1.4,
+                        speedKmh: Double? = 62,
+                        mounting: Double = 0.9,
+                        classification: RoadImpactEvent.Classification = .possibleSurfaceIrregularity)
+    -> RoadImpactEvent {
+        RoadImpactEvent(timestamp: base,
+                        latitude: 12.97,
+                        longitude: 77.59,
+                        peakVerticalG: g,
+                        speedKmh: speedKmh,
+                        confidence: 0.8,
+                        deviceMountingConfidence: mounting,
+                        classification: classification)
+    }
+
+    /// An impact is never worse than `watch`. A red mark would claim a certainty the
+    /// accelerometer cannot supply — it cannot tell a bad road from a knocked phone.
+    func testImpactSeverityNeverEscalatesPastWatch() {
+        for classification in RoadImpactEvent.Classification.allCases {
+            let event = impact(g: 4.0, classification: classification).asTripEvent()
+            XCTAssertEqual(event.severity, .watch)
+            XCTAssertEqual(event.kind, .roadImpact)
+        }
+    }
+
+    func testImpactCarriesItsPlaceAndTime() {
+        let event = impact().asTripEvent()
+        XCTAssertEqual(event.timestamp, base)
+        XCTAssertEqual(event.latitude, 12.97)
+        XCTAssertEqual(event.longitude, 77.59)
+    }
+
+    /// The note reports what was measured and never names a cause.
+    func testNoteStatesTheMeasurementWithoutNamingACause() {
+        let note = impact().note
+        XCTAssertTrue(note.contains("1.4g"))
+        XCTAssertTrue(note.contains("62 km/h"))
+        for forbidden in ["pothole", "bump", "damage", "repair"] {
+            XCTAssertFalse(note.lowercased().contains(forbidden),
+                           "an impact note must not claim \(forbidden)")
+        }
+    }
+
+    /// When the detector refused to classify it, the copy has to admit that rather
+    /// than reading like a road finding.
+    func testUnclassifiedImpactSaysItMightBeThePhone() {
+        XCTAssertTrue(impact(classification: .unclassified).note.contains("road or the phone"))
+        XCTAssertFalse(impact(classification: .possibleSurfaceIrregularity).note.contains("road or the phone"))
+    }
+
+    func testNoteOmitsSpeedWhenThereIsNone() {
+        let note = impact(speedKmh: nil).note
+        XCTAssertFalse(note.contains("km/h"), "a missing speed is left out, never shown as zero")
+    }
 }
 
 final class DocumentExtractionTests: XCTestCase {
