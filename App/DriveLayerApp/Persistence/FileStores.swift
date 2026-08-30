@@ -38,62 +38,79 @@ final class TelemetryFileStore: @unchecked Sendable {
 
     static let shared = TelemetryFileStore()
 
+    /// Serialises access to the directory. The journal is a value type holding only a
+    /// URL, so this queue is the whole of the concurrency story: appends from the drive
+    /// loop, reads from the trip screen and deletions from privacy settings all run one
+    /// at a time, in the order they were asked for.
     private let queue = DispatchQueue(label: "com.drivelayer.telemetry-store")
-    private lazy var root = ProtectedDirectory.url(named: "Telemetry", excludedFromBackup: true)
 
-    private func fileURL(vehicleID: UUID, tripID: UUID) -> URL? {
-        root?.appendingPathComponent("\(vehicleID.uuidString)-\(tripID.uuidString).dlts")
+    /// Nil only if the directory could not be prepared, in which case every call below
+    /// becomes a no-op rather than a crash - losing telemetry is not worth a crash.
+    private lazy var journal: TelemetryJournal? = ProtectedDirectory
+        .url(named: "Telemetry", excludedFromBackup: true)
+        .map { TelemetryJournal(root: $0) }
+
+    /// Writes a drive's telemetry in one go, for callers holding all of it in memory.
+    func write(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) {
+        guard let journal else { return }
+        queue.async { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: samples) }
     }
 
-    func write(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) {
-        guard !samples.isEmpty, let url = fileURL(vehicleID: vehicleID, tripID: tripID) else { return }
-        queue.async {
-            do {
-                let data = try TelemetrySeriesCodec.encode(samples)
-                try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            } catch {
-                PrivacyLog.logger(.persistence).error("Could not write telemetry for a drive")
-            }
-        }
+    /// Appends a chunk for a drive that is still going. See `TelemetryJournal`.
+    func appendChunk(samples: [TelemetrySample], vehicleID: UUID, tripID: UUID) {
+        guard let journal else { return }
+        queue.async { journal.appendChunk(samples, vehicleID: vehicleID, tripID: tripID) }
+    }
+
+    /// Compacts a finished drive's chunks, plus anything still in memory.
+    func finalise(vehicleID: UUID, tripID: UUID, appending trailing: [TelemetrySample] = []) {
+        guard let journal else { return }
+        queue.async { journal.finalise(vehicleID: vehicleID, tripID: tripID, appending: trailing) }
+    }
+
+    func discardJournal(vehicleID: UUID, tripID: UUID) {
+        guard let journal else { return }
+        queue.async { journal.discard(vehicleID: vehicleID, tripID: tripID) }
     }
 
     func read(vehicleID: UUID, tripID: UUID) -> [TelemetrySample] {
-        guard let url = fileURL(vehicleID: vehicleID, tripID: tripID),
-              let data = try? Data(contentsOf: url) else { return [] }
-        return (try? TelemetrySeriesCodec.decode(data)) ?? []
+        guard let journal else { return [] }
+        return queue.sync { journal.samples(vehicleID: vehicleID, tripID: tripID) }
     }
 
     func delete(vehicleID: UUID, tripID: UUID) {
-        guard let url = fileURL(vehicleID: vehicleID, tripID: tripID) else { return }
-        queue.async { try? FileManager.default.removeItem(at: url) }
+        guard let journal else { return }
+        queue.async { journal.delete(vehicleID: vehicleID, tripID: tripID) }
     }
 
     func deleteAll(forVehicle vehicleID: UUID) {
-        guard let root else { return }
-        queue.async {
-            let contents = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-            for url in contents where url.lastPathComponent.hasPrefix(vehicleID.uuidString) {
-                try? FileManager.default.removeItem(at: url)
-            }
-        }
+        guard let journal else { return }
+        queue.async { journal.deleteAll(vehicleID: vehicleID) }
     }
 
     func deleteEverything() {
-        guard let root else { return }
-        queue.async { try? FileManager.default.removeItem(at: root) }
+        guard let journal else { return }
+        queue.async { journal.deleteEverything() }
+    }
+
+    /// Drives whose telemetry was never compacted, because the app did not get to
+    /// finish them. Read at launch, alongside the interrupted drives in the database.
+    func interruptedTrips() -> [(vehicleID: UUID, tripID: UUID)] {
+        guard let journal else { return [] }
+        return queue.sync { journal.interruptedTrips() }
+    }
+
+    /// Deletes raw telemetry older than the driver's retention window.
+    @discardableResult
+    func deleteCompacted(olderThan cutoff: Date) -> Int {
+        guard let journal else { return 0 }
+        return queue.sync { journal.deleteCompacted(olderThan: cutoff) }
     }
 
     /// Total bytes on disk, for the storage row in settings.
     func totalBytes() -> Int64 {
-        guard let root,
-              let contents = try? FileManager.default.contentsOfDirectory(at: root,
-                                                                          includingPropertiesForKeys: [.fileSizeKey]) else {
-            return 0
-        }
-        return contents.reduce(0) { total, url in
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            return total + Int64(size)
-        }
+        guard let journal else { return 0 }
+        return queue.sync { journal.totalBytes() }
     }
 }
 
@@ -137,8 +154,26 @@ final class DocumentFileStore: @unchecked Sendable {
         }
     }
 
+    /// Empties the directory rather than removing it, for the same reason as
+    /// `TelemetryFileStore.deleteEverything()`.
     func deleteEverything() {
         guard let root else { return }
-        try? FileManager.default.removeItem(at: root)
+        let contents = (try? FileManager.default.contentsOfDirectory(at: root,
+                                                                    includingPropertiesForKeys: nil)) ?? []
+        for url in contents {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Removes the files belonging to a set of documents, for vehicle deletion.
+    ///
+    /// The database rows are deleted by `GarageStore`; without this the scans they
+    /// pointed at stayed on disk, unreferenced and so unreachable by any later
+    /// cleanup. An insurance policy and a registration certificate are exactly the
+    /// files a driver means when they say delete.
+    func delete(documentIDs: [UUID]) {
+        for id in documentIDs {
+            delete(documentID: id)
+        }
     }
 }

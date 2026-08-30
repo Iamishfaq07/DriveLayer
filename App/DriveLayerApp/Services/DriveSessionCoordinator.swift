@@ -59,6 +59,8 @@ final class DriveSessionCoordinator {
     private var consumedImpactIDs: Set<UUID> = []
 
     private var driveLoop: Task<Void, Never>?
+    /// When the live drive was last written to disk. See `checkpoint(force:now:)`.
+    private var lastCheckpointAt: Date?
     private var lastWeatherFetch: Date?
     /// When the next route lookup may happen. Set *after* an attempt finishes rather
     /// than before it starts, so a failure does not lock the feature out for the whole
@@ -75,6 +77,13 @@ final class DriveSessionCoordinator {
     private var routeWeatherPoints: [RouteWeatherPoint] = []
     private var routePolyline: [GeoPoint] = []
     private let analysisInterval: TimeInterval = 5
+    /// How often the live drive and its telemetry are written to disk.
+    ///
+    /// Twenty seconds: at 1 Hz sampling that is a bounded amount of work per write and
+    /// at most twenty seconds of a drive at risk, against a SwiftData upsert of one row
+    /// plus one small append-only file. Cheap enough to do while driving, frequent
+    /// enough that losing the gap does not matter.
+    private let checkpointInterval: TimeInterval = 20
     private let weatherInterval: TimeInterval = 15 * 60
     /// A failed route lookup is usually a tunnel or a dropped connection, which fixes
     /// itself. Waiting the full weather interval to find that out is too long.
@@ -142,8 +151,11 @@ final class DriveSessionCoordinator {
             let lastActivity = open.routePolyline.last?.timestamp ?? open.startedAt
             if let recovered = TripRecovery.finalise(open, lastKnownActivityAt: lastActivity) {
                 store.save(trip: recovered)
+                // The drive's chunks outlived the process that was writing them.
+                TelemetryFileStore.shared.finalise(vehicleID: vehicle.id, tripID: recovered.id)
             } else {
                 store.delete(tripID: open.id)
+                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: open.id)
             }
         }
     }
@@ -216,6 +228,7 @@ final class DriveSessionCoordinator {
         }
         collectRoadImpacts(into: &recorder)
         self.recorder = recorder
+        checkpoint(now: now)
         gradient = gradientCalculator.current
 
         // How far ahead the weather is gets re-measured every tick; the forecast behind
@@ -277,6 +290,9 @@ final class DriveSessionCoordinator {
             LiveActivityController.shared.start(trip: currentTrip,
                                                 vehicleName: vehicle?.nickname ?? "Your vehicle",
                                                 settings: settings)
+            // Immediately, not at the first interval: a drive that ends badly in its
+            // first twenty seconds should still leave a record that it happened.
+            checkpoint(force: true)
         case .updated:
             currentTrip = recorder.currentTrip
         case let .ended(trip):
@@ -293,6 +309,7 @@ final class DriveSessionCoordinator {
             }
             store.save(trip: finished)
             flushTelemetry(for: finished)
+            lastCheckpointAt = nil
             updateOdometer(after: finished)
             motion.clearImpacts()
             consumedImpactIDs.removeAll()
@@ -300,9 +317,17 @@ final class DriveSessionCoordinator {
             LiveActivityController.shared.end()
             clearDestination()
             refreshAnalysis(force: true)
-        case .discarded:
+        case let .discarded(discardedID, _):
             isRecording = false
             currentTrip = nil
+            lastCheckpointAt = nil
+            // A checkpoint may already have persisted this drive. Left behind it would
+            // be an incomplete row, which is exactly what recovery looks for, so the
+            // next launch would "recover" a drive the recorder deliberately threw away.
+            store.delete(tripID: discardedID)
+            if let vehicle {
+                TelemetryFileStore.shared.discardJournal(vehicleID: vehicle.id, tripID: discardedID)
+            }
             pendingSamples.removeAll()
             motion.clearImpacts()
             consumedImpactIDs.removeAll()
@@ -346,9 +371,35 @@ final class DriveSessionCoordinator {
         }
     }
 
-    private func flushTelemetry(for trip: Trip) {
+    /// Writes the live drive and its telemetry to disk.
+    ///
+    /// Drives used to be saved only at `.ended` and telemetry only flushed there too,
+    /// so iOS terminating the app during a two-hour drive lost all of it. It also made
+    /// `recoverInterruptedTrips()` unreachable: it looks for incomplete drives, and
+    /// nothing ever wrote one.
+    ///
+    /// Called from the drive loop, on drive start, and from the scene phase changing -
+    /// backgrounding is the last reliable moment before iOS may terminate the app.
+    func checkpoint(force: Bool = false, now: Date = Date()) {
+        guard isRecording, let trip = recorder?.currentTrip else { return }
+        if !force, let last = lastCheckpointAt, now.timeIntervalSince(last) < checkpointInterval {
+            return
+        }
+        lastCheckpointAt = now
+        store.save(trip: trip)
         guard let vehicle, !pendingSamples.isEmpty else { return }
-        TelemetryFileStore.shared.write(samples: pendingSamples, vehicleID: vehicle.id, tripID: trip.id)
+        TelemetryFileStore.shared.appendChunk(samples: pendingSamples,
+                                             vehicleID: vehicle.id,
+                                             tripID: trip.id)
+        pendingSamples.removeAll()
+    }
+
+    /// Compacts a finished drive's chunks into its single file.
+    private func flushTelemetry(for trip: Trip) {
+        guard let vehicle else { return }
+        TelemetryFileStore.shared.finalise(vehicleID: vehicle.id,
+                                           tripID: trip.id,
+                                           appending: pendingSamples)
         pendingSamples.removeAll()
         flushPending()
         reloadBaselines()

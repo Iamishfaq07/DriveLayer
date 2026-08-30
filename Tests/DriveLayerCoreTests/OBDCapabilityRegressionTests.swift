@@ -83,7 +83,10 @@ final class DTCCapabilityRegressionTests: XCTestCase {
 
         // 1 and 2: connect, and mode 03 answers NO DATA during discovery.
         try await session.start()
-        let capabilities = try XCTUnwrap(await session.capabilities)
+        // Hoisted out of the assertion: XCTAssert takes an autoclosure, which is not
+        // an async context, so awaiting an actor property inside one does not compile.
+        let discovered = await session.capabilities
+        let capabilities = try XCTUnwrap(discovered)
         XCTAssertEqual(capabilities.storedDTCSupport, .unknown,
                        "NO DATA on mode 03 is ambiguous and must stay ambiguous")
 
@@ -104,7 +107,8 @@ final class DTCCapabilityRegressionTests: XCTestCase {
                        "a third request actually reached the adapter")
 
         // And now it is known to work, rather than merely not ruled out.
-        let learned = try XCTUnwrap(await session.capabilities)
+        let relearned = await session.capabilities
+        let learned = try XCTUnwrap(relearned)
         XCTAssertEqual(learned.storedDTCSupport, .supported)
     }
 
@@ -120,9 +124,11 @@ final class DTCCapabilityRegressionTests: XCTestCase {
 
         XCTAssertEqual(transport.requestCount(of: "03"), 9,
                        "a healthy car answers NO DATA every time and must still be asked")
-        let capabilities = try XCTUnwrap(await session.capabilities)
+        let current = await session.capabilities
+        let capabilities = try XCTUnwrap(current)
         XCTAssertEqual(capabilities.storedDTCSupport, .unknown)
-        XCTAssertTrue(await session.canReportDiagnostics)
+        let canReport = await session.canReportDiagnostics
+        XCTAssertTrue(canReport)
     }
 
     /// The other half of the fix: a *definite* refusal is remembered, so this does not
@@ -136,7 +142,8 @@ final class DTCCapabilityRegressionTests: XCTestCase {
         try await session.start()
 
         _ = await session.readDiagnosticCodes()
-        let after = try XCTUnwrap(await session.capabilities)
+        let refused = await session.capabilities
+        let after = try XCTUnwrap(refused)
         XCTAssertEqual(after.storedDTCSupport, .unsupported,
                        "an unrecognised-command reply is not ambiguous the way NO DATA is")
 

@@ -5,6 +5,7 @@ import SwiftData
 struct DriveLayerApp: App {
 
     @State private var environment: AppEnvironment
+    @Environment(\.scenePhase) private var scenePhase
     private let container: ModelContainer
 
     init() {
@@ -22,6 +23,12 @@ struct DriveLayerApp: App {
                 .task {
                     await environment.bootstrap()
                     environment.applyRetentionPolicy()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // Backgrounding is the last reliable moment before iOS may
+                    // terminate the app, so the live drive is written out here rather
+                    // than waiting for the next interval to come round.
+                    if phase != .active { environment.drive.checkpoint(force: true) }
                 }
         }
     }
