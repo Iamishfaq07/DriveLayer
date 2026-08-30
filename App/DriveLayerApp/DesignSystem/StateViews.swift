@@ -67,6 +67,7 @@ struct DLUnavailableState: View {
         case .noDestination: return "mappin.and.ellipse"
         case .routeUnavailable: return "point.topleft.down.to.point.bottomright.curvepath"
         case .routeTooShortForForecast: return "arrow.right.to.line"
+        case .waitingForLocationFix: return "location.magnifyingglass"
         }
     }
 }
