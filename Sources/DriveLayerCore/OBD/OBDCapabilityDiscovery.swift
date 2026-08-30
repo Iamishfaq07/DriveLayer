@@ -43,6 +43,13 @@ enum ModeSupport: String, Codable, Sendable, Equatable {
     case supported
     case unsupported
     case unknown
+
+    /// Whether a request should be sent.
+    ///
+    /// `.unknown` means DriveLayer does not know, which is a reason to ask rather than
+    /// a reason to give up. Only a definite `.unsupported` stops the request, and a
+    /// `NO DATA` reply is not definite - see the note on this enum.
+    var canAttempt: Bool { self != .unsupported }
 }
 
 /// What a specific vehicle actually reports. Nothing is displayed unless it appears
@@ -70,6 +77,12 @@ struct OBDCapabilityReport: Sendable, Equatable {
         self.notes = notes
     }
 
+    /// Whether this vehicle is *known* to report this. Use for UI questions such as
+    /// "can this screen offer fault codes at all".
+    ///
+    /// Deliberately strict: `.unknown` is not a yes. For deciding whether to send a
+    /// request, use `canAttempt(_:)` instead - the two answers differ exactly where
+    /// the distinction matters.
     func supports(_ pid: OBDPID) -> Bool {
         switch pid.mode {
         case .currentData, .freezeFrame:
@@ -80,6 +93,41 @@ struct OBDCapabilityReport: Sendable, Equatable {
         case .permanentDTCs: return permanentDTCSupport == .supported
         case .vehicleInformation: return false
         }
+    }
+
+    /// Whether it is worth sending this request.
+    ///
+    /// The difference from `supports(_:)` is `.unknown`, and it is the difference
+    /// between a working fault reader and a broken one. A car with no stored codes
+    /// answers mode 03 with `NO DATA`, which is indistinguishable from "mode not
+    /// supported" and so recorded as `.unknown`. Reading that as "no" disabled fault
+    /// reading for the rest of the session - and did so *because* the car was healthy
+    /// when the session opened, which is the common case.
+    func canAttempt(_ pid: OBDPID) -> Bool {
+        switch pid.mode {
+        case .currentData, .freezeFrame:
+            // The mode 01 support bitmap is authoritative and cheap to trust, so this
+            // stays strict. Asking for a PID the ECU has listed as absent would waste
+            // a round trip on every poll, at 1 Hz, for the whole drive.
+            guard let code = pid.code else { return false }
+            return supportedCodes.contains(code)
+        case .storedDTCs: return storedDTCSupport.canAttempt
+        case .pendingDTCs: return pendingDTCSupport.canAttempt
+        case .permanentDTCs: return permanentDTCSupport.canAttempt
+        case .vehicleInformation:
+            // Mode 09 has its own support bitmap, which DriveLayer does not read yet.
+            // Unknown, therefore attemptable - rather than the hard-coded false that
+            // made VIN and calibration ID permanently unreachable.
+            return true
+        }
+    }
+
+    /// Whether fault codes can be reported on at all.
+    ///
+    /// Drives the difference between "no known active codes" and "diagnostics
+    /// unavailable", which must never be shown as the same thing.
+    var canReportDiagnostics: Bool {
+        storedDTCSupport.canAttempt || pendingDTCSupport.canAttempt || permanentDTCSupport.canAttempt
     }
 
     /// Parameters that are both reported by the vehicle and decodable by DriveLayer.

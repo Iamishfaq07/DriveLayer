@@ -99,7 +99,8 @@ actor OBDSession {
     func request(_ pid: OBDPID, respectingCapabilities: Bool = true) async throws -> OBDResponse {
         if respectingCapabilities {
             if knownUnsupported.contains(pid) { throw OBDError.pidNotSupported(pid) }
-            if let capabilities, !capabilities.supports(pid) { throw OBDError.pidNotSupported(pid) }
+            // canAttempt, not supports: an unknown diagnostic mode must still be asked.
+            if let capabilities, !capabilities.canAttempt(pid) { throw OBDError.pidNotSupported(pid) }
         }
 
         do {
@@ -144,7 +145,13 @@ actor OBDSession {
         return (readings, failures)
     }
 
-    /// Reads stored, pending and permanent codes, as far as the vehicle supports them.
+    /// Reads stored, pending and permanent codes, as far as the vehicle allows.
+    ///
+    /// Every call resolves a little more of what the vehicle actually supports: a mode
+    /// that answers is marked `.supported`, a mode that rejects the request outright is
+    /// marked `.unsupported`, and a mode that answers `NO DATA` is left `.unknown` so
+    /// it is asked again next time. Nothing here is decided once and for all from the
+    /// first reply.
     func readDiagnosticCodes() async -> (codes: [DiagnosticTroubleCode], notes: [String]) {
         var codes: [DiagnosticTroubleCode] = []
         var notes: [String] = []
@@ -155,16 +162,46 @@ actor OBDSession {
             let pid = OBDPID(mode: mode)
             do {
                 let response = try await request(pid)
+                record(mode: mode, support: .supported)
                 codes.append(contentsOf: DTCDecoder.decodeList(from: response, status: status))
             } catch let error as OBDError {
-                if case .noData = error { continue }
-                if case .pidNotSupported = error { continue }
-                notes.append("Mode " + String(format: "%02X", Int(mode.rawValue)) + ": " + error.userMessage)
+                switch error {
+                case .noData:
+                    // Ambiguous, so nothing is learned and nothing is ruled out.
+                    continue
+                case .pidNotSupported:
+                    continue
+                case .negativeResponse, .unrecognisedCommand:
+                    // A definite refusal, unlike NO DATA. Worth remembering.
+                    record(mode: mode, support: .unsupported)
+                    notes.append("Mode " + String(format: "%02X", Int(mode.rawValue)) + ": " + error.userMessage)
+                default:
+                    notes.append("Mode " + String(format: "%02X", Int(mode.rawValue)) + ": " + error.userMessage)
+                }
             } catch {
                 continue
             }
         }
         return (codes, notes)
+    }
+
+    /// Whether fault codes can be reported on at all, for the UI to distinguish
+    /// "no known active codes" from "diagnostics unavailable".
+    var canReportDiagnostics: Bool {
+        guard let capabilities else { return true }
+        return capabilities.canReportDiagnostics
+    }
+
+    /// Folds what a diagnostic mode just did back into the capability report.
+    private func record(mode: OBDMode, support: ModeSupport) {
+        guard var report = capabilities else { return }
+        switch mode {
+        case .storedDTCs: report.storedDTCSupport = support
+        case .pendingDTCs: report.pendingDTCSupport = support
+        case .permanentDTCs: report.permanentDTCSupport = support
+        case .currentData, .freezeFrame, .vehicleInformation: return
+        }
+        capabilities = report
     }
 
     /// Battery voltage measured by the adapter at the OBD port.
@@ -214,6 +251,11 @@ actor OBDSession {
     /// Records what a failure means for future polling.
     private func note(_ error: OBDError, for pid: OBDPID) {
         if error.suggestsUnsupported {
+            // NO DATA from a diagnostic mode is not a "no". A car with nothing stored
+            // answers exactly that way, and adding it here used to be the second of
+            // two independent permanent blocks - the capability report said unknown
+            // and this said never ask again, so a fault appearing later went unseen.
+            if case .noData = error, pid.mode.isDiagnostic { return }
             knownUnsupported.insert(pid)
             consecutiveTransientFailures[pid] = 0
             return

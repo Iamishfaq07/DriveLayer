@@ -29,6 +29,18 @@ enum OBDMode: UInt8, Codable, CaseIterable, Sendable {
         case .storedDTCs, .pendingDTCs, .permanentDTCs: return false
         }
     }
+
+    /// The fault-reading modes.
+    ///
+    /// Worth naming because they need different handling from current data: a mode 01
+    /// PID that answers NO DATA is almost certainly unsupported, while a diagnostic
+    /// mode that answers NO DATA is usually a car with nothing wrong with it.
+    var isDiagnostic: Bool {
+        switch self {
+        case .storedDTCs, .pendingDTCs, .permanentDTCs: return true
+        case .currentData, .freezeFrame, .vehicleInformation: return false
+        }
+    }
 }
 
 /// Identifies one request: a mode plus, where applicable, a parameter id.
