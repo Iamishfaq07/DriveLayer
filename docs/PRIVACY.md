@@ -1,0 +1,107 @@
+# Privacy
+
+## In one paragraph
+
+DriveLayer has no account, no server, no sync and no analytics. Your drives,
+telemetry, baselines, fuel log, maintenance history and documents are stored on your
+device and stay there. The only network requests the app makes are to Apple's weather
+service, and only when weather is configured and enabled.
+
+## What is collected, and where it lives
+
+| Data | Where | Protection | Retention |
+|---|---|---|---|
+| Vehicles, trips, fuel, maintenance, documents metadata | SwiftData, app container | Until first unlock | Until you delete it |
+| Engine telemetry | One file per drive, app container | Until first unlock, excluded from iCloud backup | Your retention setting (30/90/180/365 days) |
+| Document scans | App container | **Complete** file protection | Until you delete them |
+| Baseline aggregates | SwiftData | Until first unlock | Pruned to your retention setting |
+| Widget snapshot | Shared app group | Standard | Overwritten each analysis |
+
+Telemetry is excluded from iCloud backup deliberately: nobody wants hundreds of
+megabytes of engine samples in their backup, and it is regenerable by driving.
+
+Documents get **complete** protection rather than the weaker until-first-unlock
+level, because a registration certificate or insurance policy should be unreadable
+whenever the phone is locked, and nothing in DriveLayer needs to read one in the
+background.
+
+## Location
+
+Location is used for three things: recording drives, measuring terrain and gradient,
+and working out where weather changes on the road ahead.
+
+Fidelity follows what the app is doing, which is a privacy property as much as a
+battery one:
+
+- **Idle** — significant-change monitoring only.
+- **Recording a drive** — ten-metre accuracy.
+- **Drive Mode open** — best accuracy, only while you are looking at it.
+
+Background location is only requested if you turn on automatic trip recording, and
+the app explains what it buys before asking.
+
+Route polylines are downsampled before storage — a point every 25 m or 20 s, not
+every fix.
+
+## What is never logged
+
+Enforced through `PrivacyLog`, which is the only logging entry point:
+
+- **Precise coordinates.** `PrivacyLog.coarse` rounds to roughly a kilometre, and
+  even that is only used where a coordinate is genuinely needed in a log.
+- **Registration numbers and VINs.** `Vehicle.redactedDescription` is what goes in a
+  log; it contains neither.
+- **Document numbers.** `DocumentRecord.redactedDescription` shows the last four
+  characters and masks the rest.
+- **Document contents.** Never logged at all.
+- **Tokens or credentials.** There are none — there is no account.
+
+## What is sent off the device
+
+**Weather, and only weather.** When enabled, DriveLayer asks Apple's WeatherKit for
+conditions at a location. That is the only outbound request the app makes.
+
+The AI copilot ships as an **on-device, deterministic** implementation. It does not
+call a model, does not need a network, and cannot invent a sensor reading.
+
+The architecture for a future model-backed copilot is deliberately shaped around this
+constraint: `CopilotProviding` takes a `VehicleContextSnapshot`, never raw telemetry.
+A snapshot is a few dozen summarised fields — health statuses, trip summaries, fuel
+figures, recent insight headlines — with **no route, no coordinates, no VIN, no
+registration and no telemetry stream**. A test asserts exactly that. Any future
+provider physically cannot be handed data the snapshot does not contain.
+
+## Your controls
+
+In **Settings → Your data**:
+
+- **Export this vehicle's data** — everything about one vehicle as readable JSON.
+- **Delete all data** — every vehicle, drive, baseline, fuel entry, document and
+  telemetry file, gone.
+- **Keep engine history for** — 30, 90, 180 or 365 days. Not "forever": telemetry you
+  have no use for is a liability, not a feature.
+
+In the **Garage**, deleting a vehicle removes its trips, baselines, fuel entries,
+maintenance items, documents and telemetry files — not just the row.
+
+## Permissions
+
+All optional. The app is useful with none of them.
+
+| Permission | What it buys | Without it |
+|---|---|---|
+| Location (when in use) | Trip recording, terrain, gradient, route weather | Manual drives, no route or terrain |
+| Location (always) | Drives that start and stop on their own | Start drives from the Drive tab |
+| Motion | Accurate altitude, so gradient means something; road surface events | GPS altitude only, lower confidence |
+| Bluetooth | Live engine data from an OBD-II adapter | Phone-only intelligence (Level 1) |
+| Camera | Scanning documents into the glovebox | Type document details in |
+
+Every permission string in `Info.plist` says what the data is used for and that it
+stays on the device.
+
+## What DriveLayer will not do
+
+- Sell or share vehicle or location data. There is no third party to share it with.
+- Upload telemetry silently. There is no upload path.
+- Require an account.
+- Track you between vehicles or across apps.

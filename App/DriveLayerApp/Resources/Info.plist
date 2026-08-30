@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>DriveLayer</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UIUserInterfaceStyle</key>
+	<string>Automatic</string>
+
+	<!-- The scheme widgets, shortcuts and CarPlay use to name a screen. The set of
+	     destinations it accepts is defined in DeepLink.swift and nowhere else. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.drivelayer.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>drivelayer</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Permission copy. Each one says what the app does with the data and, where
+	     relevant, that it stays on the device. Vague strings get apps rejected and,
+	     more importantly, are how users end up denying a permission they'd have
+	     granted if they understood it. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>DriveLayer uses your location to record drives, measure terrain and gradient, and work out where weather changes on the road ahead. Your location stays on this device.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allowing location all the time lets DriveLayer start and finish recording a drive on its own, without you opening the app. Your location stays on this device and is never uploaded.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>DriveLayer uses the barometer for accurate altitude, which is what makes road gradient meaningful, and can notice unusually rough road surfaces.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>DriveLayer connects to a Bluetooth OBD-II adapter to read your vehicle's engine data. It only ever reads — it never sends commands that change anything in your car.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>DriveLayer can scan documents like your insurance or registration into the glovebox. Scans are stored on this device with file protection and are never uploaded.</string>
+
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<false/>
+
+	<!-- WeatherKit needs a paid capability on the developer account. Until it is
+	     enabled here, the app says weather is not configured and everything else
+	     keeps working. See docs/ARCHITECTURE.md. -->
+	<key>DLWeatherKitEnabled</key>
+	<false/>
+
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>bluetooth-central</string>
+	</array>
+
+	<!-- CarPlay: the scene role below is deliberately absent until Apple grants the
+	     driving-task entitlement. The CarPlay code ships and compiles; enabling it is
+	     two documented steps in docs/CARPLAY.md. -->
+</dict>
+</plist>

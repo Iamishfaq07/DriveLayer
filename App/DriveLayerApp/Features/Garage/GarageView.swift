@@ -1,0 +1,232 @@
+import SwiftUI
+
+struct GarageView: View {
+
+    @Environment(AppEnvironment.self) private var environment
+    @State private var isAddingVehicle = false
+
+    private var formatter: DisplayFormatter { environment.formatter }
+
+    var body: some View {
+        List {
+            Section("Your vehicles") {
+                ForEach(environment.vehicles) { vehicle in
+                    Button {
+                        environment.select(vehicleID: vehicle.id)
+                    } label: {
+                        VehicleRow(vehicle: vehicle,
+                                   isSelected: vehicle.id == environment.selectedVehicleID,
+                                   formatter: formatter)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if let vehicle = environment.selectedVehicle {
+                Section("Selected vehicle") {
+                    NavigationLink(destination: EditVehicleView(vehicle: vehicle)) {
+                        Label("Edit details", systemImage: "pencil")
+                    }
+                }
+            }
+            Section {
+                Button {
+                    isAddingVehicle = true
+                } label: {
+                    Label("Add a vehicle", systemImage: "plus")
+                }
+            }
+            Section {
+                Text("Each vehicle keeps its own drives, baselines, fuel log, maintenance and documents. Switching cars never mixes one car's history into another's.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+            }
+        }
+        .navigationTitle("Garage")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isAddingVehicle) {
+            AddVehicleView { vehicle in
+                environment.add(vehicle: vehicle)
+            }
+        }
+    }
+}
+
+private struct VehicleRow: View {
+    let vehicle: Vehicle
+    let isSelected: Bool
+    let formatter: DisplayFormatter
+
+    private var profile: VehicleProfile? { VehicleProfileCatalog.profile(id: vehicle.profileID) }
+
+    var body: some View {
+        HStack(spacing: DL.Spacing.medium) {
+            Image(systemName: "car.side")
+                .font(.system(size: 20))
+                .foregroundStyle(isSelected ? DLColor.accent : DLColor.secondaryText)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(vehicle.nickname)
+                    .font(DL.Font.body.weight(.medium))
+                    .foregroundStyle(DLColor.primaryText)
+                Text([profile?.displayName,
+                      vehicle.modelYear.map(String.init),
+                      profile?.validationTier.label]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                if let odometer = vehicle.odometerKm {
+                    Text("\(formatter.distance(kilometres: odometer, fractionDigits: 0) ?? "") \(formatter.distanceUnitLabel)")
+                        .font(DL.Font.caption.monospacedDigit())
+                        .foregroundStyle(DLColor.unknown)
+                }
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(DLColor.accent)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Vehicle creation.
+///
+/// A profile is chosen, not detected: VIN decoding needs a service DriveLayer does
+/// not have, and guessing a model from an adapter would be worse than asking.
+struct AddVehicleView: View {
+
+    let onSave: (Vehicle) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var nickname = ""
+    @State private var profileID = VehicleProfileCatalog.harrier2026AdventureXPlusID
+    @State private var modelYear = ""
+    @State private var registration = ""
+    @State private var odometer = ""
+    @State private var tankOverride = ""
+
+    private var profile: VehicleProfile? { VehicleProfileCatalog.profile(id: profileID) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Vehicle") {
+                    TextField("Name it", text: $nickname)
+                    Picker("Profile", selection: $profileID) {
+                        ForEach(VehicleProfileCatalog.all) { candidate in
+                            Text(candidate.displayName).tag(candidate.id)
+                        }
+                    }
+                    TextField("Model year", text: $modelYear)
+                        .keyboardType(.numberPad)
+                }
+
+                if let profile {
+                    Section("What this profile gives you") {
+                        HStack {
+                            Text("Validation")
+                            Spacer()
+                            Text(profile.validationTier.label)
+                                .foregroundStyle(DLColor.secondaryText)
+                        }
+                        Text(profile.validationTier.explanation)
+                            .font(DL.Font.caption)
+                            .foregroundStyle(DLColor.secondaryText)
+                        ForEach(profile.notes, id: \.self) { note in
+                            Text(note)
+                                .font(DL.Font.caption)
+                                .foregroundStyle(DLColor.secondaryText)
+                        }
+                    }
+                }
+
+                Section("Details") {
+                    TextField("Odometer (km)", text: $odometer)
+                        .keyboardType(.numberPad)
+                    TextField("Tank capacity override (L)", text: $tankOverride)
+                        .keyboardType(.decimalPad)
+                    TextField("Registration (optional)", text: $registration)
+                        .textInputAutocapitalization(.characters)
+                }
+
+                Section {
+                    Text("Registration stays on this device, is never logged, and is never sent anywhere.")
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.secondaryText)
+                }
+            }
+            .navigationTitle("Add vehicle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { save() }.disabled(nickname.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let vehicle = Vehicle(nickname: nickname.trimmingCharacters(in: .whitespaces),
+                              profileID: profileID,
+                              modelYear: Int(modelYear),
+                              registrationNumber: registration.isEmpty ? nil : registration,
+                              odometerKm: Double(odometer),
+                              odometerUpdatedAt: Double(odometer) == nil ? nil : Date(),
+                              tankCapacityOverrideLitres: Double(tankOverride.replacingOccurrences(of: ",", with: ".")),
+                              isPrimary: true)
+        onSave(vehicle)
+        dismiss()
+    }
+}
+
+struct EditVehicleView: View {
+
+    @State var vehicle: Vehicle
+    @Environment(AppEnvironment.self) private var environment
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var odometer = ""
+    @State private var isConfirmingDelete = false
+
+    var body: some View {
+        Form {
+            Section("Vehicle") {
+                TextField("Name", text: $vehicle.nickname)
+                TextField("Odometer (km)", text: $odometer)
+                    .keyboardType(.numberPad)
+            }
+            Section {
+                Button(role: .destructive) {
+                    isConfirmingDelete = true
+                } label: {
+                    Label("Delete this vehicle and its data", systemImage: "trash")
+                }
+            } footer: {
+                Text("This removes every drive, baseline, fuel entry, maintenance item and document belonging to this vehicle. It cannot be undone.")
+            }
+        }
+        .navigationTitle(vehicle.nickname)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    vehicle.odometerKm = Double(odometer) ?? vehicle.odometerKm
+                    vehicle.odometerUpdatedAt = Date()
+                    environment.store.update(vehicle: vehicle)
+                    environment.reloadVehicles()
+                    dismiss()
+                }
+            }
+        }
+        .onAppear { odometer = vehicle.odometerKm.map { String(Int($0)) } ?? "" }
+        .confirmationDialog("Delete this vehicle?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
+            Button("Delete everything", role: .destructive) {
+                environment.deleteSelectedVehicle()
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+}

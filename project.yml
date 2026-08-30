@@ -1,0 +1,119 @@
+name: DriveLayer
+
+# Generated with XcodeGen: `brew install xcodegen && xcodegen generate`.
+#
+# The project file is generated rather than committed so that adding a source file
+# never produces a merge conflict in a 4,000-line pbxproj, and so the target
+# configuration is reviewable as a diff.
+#
+# Note how the sources are split. The app and the widget compile the core sources
+# directly, which means the core needs no `public` annotations and stays readable.
+# The unit tests depend on the Swift package instead, which builds the same sources
+# as a real module so `@testable import` works — and lets `swift test` run the whole
+# suite from the command line, on any machine, without Xcode.
+
+options:
+  bundleIdPrefix: com.drivelayer
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: minimal
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"     # iPhone. Watch and iPad come later.
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+
+packages:
+  DriveLayer:
+    path: .
+
+targets:
+
+  DriveLayer:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/DriveLayerCore
+      - path: App/DriveLayerApp
+      - path: App/Shared
+    info:
+      path: App/DriveLayerApp/Resources/Info.plist
+    entitlements:
+      path: App/DriveLayerApp/Resources/DriveLayer.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app
+        PRODUCT_NAME: DriveLayer
+        INFOPLIST_FILE: App/DriveLayerApp/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/DriveLayerApp/Resources/DriveLayer.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - target: DriveLayerWidgets
+        embed: true
+
+  DriveLayerWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: App/DriveLayerWidgets
+      - path: App/Shared
+      # Only the two core files the widgets genuinely need. Compiling the whole core
+      # into an extension would bloat it for no benefit.
+      - path: Sources/DriveLayerCore/Core/SemanticStatus.swift
+      - path: Sources/DriveLayerCore/Core/PrivacyLog.swift
+      - path: Sources/DriveLayerCore/Core/DeepLink.swift
+    info:
+      path: App/DriveLayerWidgets/Info.plist
+    entitlements:
+      path: App/DriveLayerWidgets/DriveLayerWidgets.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app.widgets
+        PRODUCT_NAME: DriveLayerWidgets
+        INFOPLIST_FILE: App/DriveLayerWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/DriveLayerWidgets/DriveLayerWidgets.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+
+  DriveLayerCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/DriveLayerCoreTests
+    dependencies:
+      - package: DriveLayer
+        product: DriveLayerCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.core.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  DriveLayer:
+    build:
+      targets:
+        DriveLayer: all
+        DriveLayerWidgets: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DriveLayerCoreTests
+    profile:
+      config: Release
+    archive:
+      config: Release
