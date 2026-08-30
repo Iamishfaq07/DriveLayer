@@ -106,9 +106,6 @@ struct DriveView: View {
         .dlCard()
     }
 
-    /// The part that makes this Drive Mode rather than a speedometer: at most three
-    /// pieces of context, urgent first, and nothing at all when there is nothing to say.
-    @ViewBuilder
     /// Where the driver is going, and what the weather does on the way.
     ///
     /// Optional and off by default. DriveLayer is not a navigation app; it asks for a
@@ -157,6 +154,9 @@ struct DriveView: View {
         }
     }
 
+    /// The part that makes this Drive Mode rather than a speedometer: at most three
+    /// pieces of context, urgent first, and nothing at all when there is nothing to say.
+    @ViewBuilder
     private var contextSection: some View {
         let visible = InsightEngine.forDriving(drive.insights)
         if visible.isEmpty {
