@@ -1,10 +1,16 @@
 import SwiftUI
 
 /// The Vehicle tab. Owns the navigation container.
+///
+/// The path is bound from `RootView` so a deep link arriving from a widget can push
+/// the glovebox or the maintenance list without this view knowing where it came from.
 struct VehicleView: View {
+    @Binding var path: [DeepLink]
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VehicleContentView()
+                .deepLinkDestinations()
         }
     }
 }
@@ -108,11 +114,13 @@ struct VehicleContentView: View {
 
     private var manageSection: some View {
         Section("Manage") {
-            NavigationLink(destination: FuelView()) { Label("Fuel", systemImage: "fuelpump") }
-            NavigationLink(destination: MaintenanceView()) { Label("Maintenance", systemImage: "wrench.and.screwdriver") }
-            NavigationLink(destination: DocumentsView()) { Label("Glovebox", systemImage: "folder") }
-            NavigationLink(destination: GarageView()) { Label("Garage", systemImage: "car.2") }
-            NavigationLink(destination: SettingsView()) { Label("Settings", systemImage: "gearshape") }
+            // Value-based links, so tapping a row and following a widget end up on
+            // the same screen by the same route.
+            NavigationLink(value: DeepLink.fuel) { Label("Fuel", systemImage: "fuelpump") }
+            NavigationLink(value: DeepLink.maintenance) { Label("Maintenance", systemImage: "wrench.and.screwdriver") }
+            NavigationLink(value: DeepLink.documents) { Label("Glovebox", systemImage: "folder") }
+            NavigationLink(value: DeepLink.garage) { Label("Garage", systemImage: "car.2") }
+            NavigationLink(value: DeepLink.settings) { Label("Settings", systemImage: "gearshape") }
         }
     }
 }

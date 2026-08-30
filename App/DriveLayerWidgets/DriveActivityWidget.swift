@@ -16,6 +16,7 @@ struct DriveActivityWidget: Widget {
             LockScreenDriveView(context: context)
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(.white)
+                .widgetURL(DeepLink.drive.url)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -50,6 +51,7 @@ struct DriveActivityWidget: Widget {
             } minimal: {
                 Image(systemName: context.state.vehicleStatus.symbolName)
             }
+            .widgetURL(DeepLink.drive.url)
         }
         #else
         StaticConfiguration(kind: "DriveLayerDriveActivity", provider: SnapshotProvider()) { _ in

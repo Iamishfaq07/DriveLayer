@@ -74,6 +74,7 @@ targets:
       # into an extension would bloat it for no benefit.
       - path: Sources/DriveLayerCore/Core/SemanticStatus.swift
       - path: Sources/DriveLayerCore/Core/PrivacyLog.swift
+      - path: Sources/DriveLayerCore/Core/DeepLink.swift
     info:
       path: App/DriveLayerWidgets/Info.plist
     entitlements:

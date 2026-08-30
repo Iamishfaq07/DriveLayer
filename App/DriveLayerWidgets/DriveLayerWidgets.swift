@@ -163,6 +163,9 @@ struct VehicleStatusWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        // Tapping opens what the widget is actually showing: the insight if there is
+        // one, the vehicle's own screen if there isn't.
+        .widgetURL(entry.snapshot.headlineInsightTitle == nil ? DeepLink.vehicle.url : DeepLink.insights.url)
     }
 }
 
@@ -183,6 +186,11 @@ struct RangeWidgetView: View {
     let entry: SnapshotEntry
 
     var body: some View {
+        content.widgetURL(DeepLink.fuel.url)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch family {
         case .accessoryCircular:
             Gauge(value: entry.snapshot.fuelLevelPercent ?? 0, in: 0...100) {
@@ -254,6 +262,7 @@ struct ServiceWidgetView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetURL(DeepLink.maintenance.url)
     }
 }
 
@@ -300,5 +309,8 @@ struct LastTripWidgetView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        // The snapshot carries no trip identifier, so this opens the list rather
+        // than pretending it can open the drive it is describing.
+        .widgetURL(DeepLink.trips.url)
     }
 }

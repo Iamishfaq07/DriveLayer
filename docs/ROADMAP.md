@@ -163,11 +163,11 @@ Honest list of what is scaffolding rather than working software.
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
 | **Elevation provider** | Protocol plus an honest mock. No real elevation source is bundled, so terrain-ahead is only live with a provider configured. |
 | **Route weather** | Analyser and waypoint builder are done and tested; nothing yet supplies a route, so it needs a destination or navigation integration to fire. |
-| **Document scanning** | Field extraction is implemented and tested; the VisionKit capture UI is not wired up, so documents are typed in. |
+| **Document scanning** | Capture and on-device recognition are wired to the tested extractor. Compiled in CI; not yet exercised against a real document on hardware. |
 | **Road impact events** | Detection implemented and tested; events are recorded locally and not yet surfaced in the UI or corroborated across drives. |
 | **Live Activity range** | The field exists; the coordinator does not yet populate it. |
 | **Trip weather** | `Trip.weather` is modelled but not captured during a drive. |
-| **Widget deep links** | Widgets display; tapping one opens the app but not a specific screen. |
+| **Widget deep links** | Every widget and the Live Activity open the screen they describe. The last-drive widget opens the trip list rather than the drive itself — the widget snapshot carries no trip identifier. |
 | **Notifications** | No local notifications yet for expiring documents or overdue service. |
 | **Watch app** | Not started. |
 
@@ -176,8 +176,8 @@ Honest list of what is scaffolding rather than working software.
 1. ~~Build it.~~ **Done** — CI compiles everything and runs the suite.
 2. ~~Local notifications for document expiry and overdue service.~~ **Done.**
 3. ~~Populate Live Activity range and capture trip weather.~~ **Done.**
-4. Wire the VisionKit capture flow to the existing, tested extractor.
-5. Widget deep links.
+4. ~~Wire the VisionKit capture flow to the existing, tested extractor.~~ **Done.**
+5. ~~Widget deep links.~~ **Done.**
 6. Accessibility pass: Dynamic Type at the largest sizes, VoiceOver labels on every
    metric, contrast check on the status palette.
 7. Run it on a device against a real adapter — the first thing that will find

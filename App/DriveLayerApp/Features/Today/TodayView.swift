@@ -7,6 +7,9 @@ import SwiftUI
 /// driver would actually plan around — never raw telemetry for its own sake.
 struct TodayView: View {
 
+    /// Bound from `RootView` so a widget tap can push a screen onto this tab.
+    @Binding var path: [DeepLink]
+
     @Environment(AppEnvironment.self) private var environment
     @State private var isShowingCopilot = false
 
@@ -14,7 +17,7 @@ struct TodayView: View {
     private var drive: DriveSessionCoordinator { environment.drive }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: DL.Spacing.large) {
                     if environment.selectedVehicle == nil {
@@ -37,6 +40,7 @@ struct TodayView: View {
             .toolbar { toolbarContent }
             .refreshable { drive.refreshAnalysis(force: true) }
             .sheet(isPresented: $isShowingCopilot) { CopilotView() }
+            .deepLinkDestinations()
         }
     }
 
@@ -44,13 +48,13 @@ struct TodayView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                NavigationLink(destination: GarageView()) {
+                NavigationLink(value: DeepLink.garage) {
                     Label("Garage", systemImage: "car.2")
                 }
-                NavigationLink(destination: InsightsView()) {
+                NavigationLink(value: DeepLink.insights) {
                     Label("All insights", systemImage: "lightbulb")
                 }
-                NavigationLink(destination: SettingsView()) {
+                NavigationLink(value: DeepLink.settings) {
                     Label("Settings", systemImage: "gearshape")
                 }
             } label: {
@@ -98,7 +102,7 @@ struct TodayView: View {
     @ViewBuilder
     private var healthCard: some View {
         if let health = drive.health {
-            NavigationLink(destination: VehicleContentView()) {
+            NavigationLink(value: DeepLink.vehicle) {
                 VStack(alignment: .leading, spacing: DL.Spacing.small) {
                     SectionLabel(text: "Vehicle")
                     HStack(spacing: DL.Spacing.small) {
@@ -223,7 +227,7 @@ struct TodayView: View {
                     SectionLabel(text: "Worth knowing")
                     Spacer()
                     if drive.insights.count > visible.count {
-                        NavigationLink("See all", destination: InsightsView())
+                        NavigationLink("See all", value: DeepLink.insights)
                             .font(DL.Font.caption)
                     }
                 }
@@ -241,7 +245,7 @@ struct TodayView: View {
                                                       currentOdometerKm: vehicle.odometerKm,
                                                       now: Date())
             if let next = statuses.first(where: { $0.status != .unknown }) {
-                NavigationLink(destination: MaintenanceView()) {
+                NavigationLink(value: DeepLink.maintenance) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: DL.Spacing.hairline) {
                             SectionLabel(text: "Next service")

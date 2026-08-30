@@ -31,6 +31,22 @@
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
 
+	<!-- The scheme widgets, shortcuts and CarPlay use to name a screen. The set of
+	     destinations it accepts is defined in DeepLink.swift and nowhere else. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.drivelayer.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>drivelayer</string>
+			</array>
+		</dict>
+	</array>
+
 	<!-- Permission copy. Each one says what the app does with the data and, where
 	     relevant, that it stays on the device. Vague strings get apps rejected and,
 	     more importantly, are how users end up denying a permission they'd have

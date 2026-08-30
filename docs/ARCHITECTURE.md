@@ -138,6 +138,26 @@ updates a finding rather than stacking duplicates.
   driven by explicit `update(…)` calls, with no timers of its own — which is why
   duplicate starts, dropped adapters and app kills are all reachable in tests.
 
+## Navigation and deep links
+
+`DeepLink` is a plain enum in the core with a URL on one side and a case on the
+other, so the rules for what `drivelayer://maintenance` means are unit tested
+without a UI. It parses strictly: an unrecognised destination returns `nil` rather
+than falling back to a home screen, because opening a screen the caller did not ask
+for is worse than ignoring the link.
+
+The app layer adds one extension mapping each link to a tab and a path, and one view
+resolving a link to a screen. `RootView` owns the navigation paths — not each tab —
+because a widget tap has to set them from outside. Rows inside the app use
+`NavigationLink(value: DeepLink…)` against the same table, so tapping "Glovebox" and
+following a widget arrive by the same route.
+
+Widgets link to what they are actually showing: the fuel widget to fuel, the service
+widget to maintenance, the status widget to the insight it is displaying or to the
+vehicle screen when there is none. The last-drive widget opens the trip list rather
+than the drive it describes, because the widget snapshot carries no trip identifier —
+a link that guessed at one would sometimes open the wrong drive.
+
 ## Deployment target
 
 iOS 17. Chosen for `@Observable`, SwiftData, and the ActivityKit and WidgetKit APIs
