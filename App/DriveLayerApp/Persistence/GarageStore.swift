@@ -316,6 +316,9 @@ final class GarageStore {
             var maintenanceItems: [MaintenanceItem]
             var serviceRecords: [ServiceRecord]
             var documents: [DocumentRecord]
+            /// Included because these carry coordinates. An export that quietly left
+            /// out a location-bearing record type would not be the whole truth.
+            var roadEvents: [RoadImpactEvent]
         }
         let bundle = ExportBundle(exportedAt: Date(),
                                   vehicle: vehicles().first { $0.id == vehicleID },
@@ -323,7 +326,8 @@ final class GarageStore {
                                   fuelEntries: fuelEntries(vehicleID: vehicleID),
                                   maintenanceItems: maintenanceItems(vehicleID: vehicleID),
                                   serviceRecords: serviceRecords(vehicleID: vehicleID),
-                                  documents: documents(vehicleID: vehicleID))
+                                  documents: documents(vehicleID: vehicleID),
+                                  roadEvents: roadEvents(vehicleID: vehicleID))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

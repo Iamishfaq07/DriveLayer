@@ -15,6 +15,7 @@ struct RootView: View {
     /// Navigation paths live here rather than inside each tab, because a deep link
     /// arriving from a widget has to be able to set them from outside.
     @State private var todayPath: [DeepLink] = []
+    @State private var tripsPath: [DeepLink] = []
     @State private var vehiclePath: [DeepLink] = []
 
     enum Tab: Hashable {
@@ -34,7 +35,7 @@ struct RootView: View {
                     .tabItem { Label("Drive", systemImage: "steeringwheel") }
                     .tag(Tab.drive)
 
-                TripsListView()
+                TripsListView(path: $tripsPath)
                     .tabItem { Label("Trips", systemImage: "map") }
                     .tag(Tab.trips)
 
@@ -62,8 +63,9 @@ struct RootView: View {
         selection = route.tab
         switch route.tab {
         case .today: todayPath = route.path
+        case .trips: tripsPath = route.path
         case .vehicle: vehiclePath = route.path
-        case .drive, .trips: break // Neither tab has a screen a link can push.
+        case .drive: break // Drive Mode is one screen; there is nothing to push onto it.
         }
     }
 }

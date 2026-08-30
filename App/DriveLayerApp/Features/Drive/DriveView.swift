@@ -10,6 +10,7 @@ struct DriveView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var isShowingTelemetry = false
     @State private var isShowingCopilot = false
+    @State private var isChoosingDestination = false
 
     private var drive: DriveSessionCoordinator { environment.drive }
     private var formatter: DisplayFormatter { environment.formatter }
@@ -25,6 +26,7 @@ struct DriveView: View {
                 VStack(alignment: .leading, spacing: DL.Spacing.large) {
                     speedBlock
                     tripRow
+                    destinationSection
                     contextSection
                     controls
                 }
@@ -102,6 +104,65 @@ struct DriveView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .dlCard()
+    }
+
+    /// Where the driver is going, and what the weather does on the way.
+    ///
+    /// Optional and off by default. DriveLayer is not a navigation app; it asks for a
+    /// destination only because "rain in 14 km" needs to know which 14 km, and
+    /// looking up a route is the one thing here that sends a location off the device.
+    @ViewBuilder
+    private var destinationSection: some View {
+        VStack(alignment: .leading, spacing: DL.Spacing.small) {
+            SectionLabel(text: "Heading to")
+            // Two sibling buttons, not one nested in the other's label: SwiftUI gives
+            // a Button's whole label to the Button, so a "Clear" placed inside it
+            // could never be tapped — every tap opened the search sheet instead.
+            HStack(spacing: DL.Spacing.small) {
+                Button {
+                    isChoosingDestination = true
+                } label: {
+                    HStack(spacing: DL.Spacing.small) {
+                        Image(systemName: drive.destination == nil ? "mappin.and.ellipse" : "location.fill")
+                            .foregroundStyle(DLColor.accent)
+                            .accessibilityHidden(true)
+                        Text(drive.destination?.name ?? "Set a destination")
+                            .font(DL.Font.body)
+                            .foregroundStyle(drive.destination == nil ? DLColor.secondaryText : DLColor.primaryText)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(drive.destination == nil
+                                    ? "Set a destination"
+                                    : "Heading to \(drive.destination?.name ?? ""). Change destination.")
+
+                if drive.destination != nil {
+                    Button("Clear") { drive.setDestination(nil) }
+                        .font(DL.Font.callout)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DLColor.accent)
+                        .accessibilityLabel("Clear destination")
+                }
+            }
+
+            if drive.destination != nil, let reason = drive.routeUnavailability {
+                Text(reason.message)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dlCard()
+        .sheet(isPresented: $isChoosingDestination) {
+            DestinationSearchView { destination in
+                drive.setDestination(destination)
+                isChoosingDestination = false
+            }
+        }
     }
 
     /// The part that makes this Drive Mode rather than a speedometer: at most three

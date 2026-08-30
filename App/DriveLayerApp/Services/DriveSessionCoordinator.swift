@@ -26,6 +26,9 @@ final class DriveSessionCoordinator {
     private(set) var currentWeather: WeatherSnapshot?
     private(set) var weatherChanges: [WeatherChange] = []
     private(set) var weatherUnavailability: UnavailabilityReason?
+    /// Where the driver said they are going, if anywhere.
+    private(set) var destination: RouteDestination?
+    private(set) var routeUnavailability: UnavailabilityReason?
     private(set) var isRecording = false
     private(set) var lastAnalysisAt: Date?
 
@@ -38,6 +41,7 @@ final class DriveSessionCoordinator {
     private let motion: MotionService
     private let settings: AppSettings
     private var weather: WeatherProviding
+    private var route: RouteProviding
     /// Set by `AppEnvironment` after construction; reminders are a side effect of
     /// analysis rather than something the coordinator needs to own.
     weak var reminders: ReminderScheduler?
@@ -50,23 +54,60 @@ final class DriveSessionCoordinator {
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
 
+    /// Impacts already taken from `MotionService`, so the same jolt is not recorded
+    /// twice as the loop re-reads its rolling buffer.
+    private var consumedImpactIDs: Set<UUID> = []
+
     private var driveLoop: Task<Void, Never>?
     private var lastWeatherFetch: Date?
+    /// When the next route lookup may happen. Set *after* an attempt finishes rather
+    /// than before it starts, so a failure does not lock the feature out for the whole
+    /// interval, and a shorter one is used when the failure is the kind that passes.
+    private var nextRouteFetchAfter: Date?
+    /// The refresh currently in flight, if any. Held so a destination change can cancel
+    /// it rather than race it.
+    private var routeWeatherTask: Task<Void, Never>?
+    /// Bumped whenever the destination changes. A refresh carries the value it started
+    /// with, and publishes nothing if it no longer matches.
+    private var routeGeneration = 0
+    /// The last route forecast and the road it was measured along, kept so distances
+    /// can be re-measured as the driver moves without refetching anything.
+    private var routeWeatherPoints: [RouteWeatherPoint] = []
+    private var routePolyline: [GeoPoint] = []
     private let analysisInterval: TimeInterval = 5
     private let weatherInterval: TimeInterval = 15 * 60
+    /// A failed route lookup is usually a tunnel or a dropped connection, which fixes
+    /// itself. Waiting the full weather interval to find that out is too long.
+    private let routeRetryInterval: TimeInterval = 60
 
     init(store: GarageStore,
          obd: OBDConnectionManager,
          location: LocationService,
          motion: MotionService,
          settings: AppSettings,
-         weather: WeatherProviding) {
+         weather: WeatherProviding,
+         route: RouteProviding) {
         self.store = store
         self.obd = obd
         self.location = location
         self.motion = motion
         self.settings = settings
         self.weather = weather
+        self.route = route
+    }
+
+    func setRouteProvider(_ provider: RouteProviding) {
+        route = provider
+        // Same reason `setWeatherProvider` clears its stamp. `AppEnvironment` swaps the
+        // straight-line simulator provider for MapKit when an adapter connects, and
+        // without this the simulated road's forecast stays up for fifteen minutes,
+        // presented as though it came from a real one.
+        nextRouteFetchAfter = nil
+        routeWeatherTask?.cancel()
+        routeWeatherTask = nil
+        routeWeatherPoints = []
+        routePolyline = []
+        if destination != nil { scheduleRouteWeatherRefresh(force: true) }
     }
 
     // MARK: - Vehicle selection
@@ -173,12 +214,49 @@ final class DriveSessionCoordinator {
         if isRecording, let telemetry {
             collectTelemetry(telemetry, at: now)
         }
+        collectRoadImpacts(into: &recorder)
+        self.recorder = recorder
         gradient = gradientCalculator.current
+
+        // How far ahead the weather is gets re-measured every tick; the forecast behind
+        // it is only refetched every fifteen minutes. Cheap, and local. Done before
+        // analysis so insights read the distance as it is now, not as it was when the
+        // forecast was fetched.
+        remeasureRouteWeather()
 
         if lastAnalysisAt == nil || now.timeIntervalSince(lastAnalysisAt!) >= analysisInterval {
             refreshAnalysis()
         }
         await refreshWeatherIfNeeded(at: point, now: now)
+        // Started, not awaited. A route refresh is a directions call plus a forecast
+        // call per waypoint; awaiting it here would stall the 1 Hz loop for as long as
+        // a slow link takes to answer, and with it location sampling, trip start and
+        // stop detection, and the gradient.
+        scheduleRouteWeatherRefresh()
+    }
+
+    /// Persists impacts the motion service has detected and puts them on the drive.
+    ///
+    /// Only while recording: a jolt with the car parked is the phone being picked up,
+    /// which is exactly the thing `RoadImpactEvent` refuses to call a pothole. Nothing
+    /// is stored when the driver has the feature switched off.
+    private func collectRoadImpacts(into recorder: inout TripRecorder) {
+        guard settings.roadImpactDetectionEnabled, isRecording else { return }
+        let fresh = motion.recentImpacts.filter { !consumedImpactIDs.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+
+        for event in fresh.sorted(by: { $0.timestamp < $1.timestamp }) {
+            consumedImpactIDs.insert(event.id)
+            if let vehicleID = vehicle?.id {
+                store.add(roadEvent: event, vehicleID: vehicleID)
+            }
+            recorder.add(event: event.asTripEvent())
+        }
+
+        // The buffer holds 50; keeping every ID forever would grow without bound on a
+        // long drive, and an ID that has fallen out of the buffer cannot recur.
+        let live = Set(motion.recentImpacts.map(\.id))
+        consumedImpactIDs.formIntersection(live)
     }
 
     private func handle(_ outcome: TripRecorderOutcome, recorder: inout TripRecorder) {
@@ -190,6 +268,10 @@ final class DriveSessionCoordinator {
             downsampler.reset()
             pendingSamples.removeAll()
             gradientCalculator.reset()
+            // The buffer can hold jolts from before the drive — a phone being picked
+            // up and put in a cradle looks exactly like a bad road surface.
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .driving)
             currentTrip = recorder.currentTrip
             LiveActivityController.shared.start(trip: currentTrip,
@@ -212,15 +294,21 @@ final class DriveSessionCoordinator {
             store.save(trip: finished)
             flushTelemetry(for: finished)
             updateOdometer(after: finished)
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .idle)
             LiveActivityController.shared.end()
+            clearDestination()
             refreshAnalysis(force: true)
         case .discarded:
             isRecording = false
             currentTrip = nil
             pendingSamples.removeAll()
+            motion.clearImpacts()
+            consumedImpactIDs.removeAll()
             location.start(fidelity: .idle)
             LiveActivityController.shared.end()
+            clearDestination()
         }
     }
 
@@ -407,9 +495,202 @@ final class DriveSessionCoordinator {
 
     /// Applies a route forecast. Called by the Drive screen once a destination or a
     /// polyline is known; without one there is no "ahead" to forecast for.
-    func applyRouteWeather(_ points: [RouteWeatherPoint]) {
+    ///
+    /// The polyline is kept alongside the points so `remeasureRouteWeather` can work
+    /// out how much of it the driver has already covered.
+    func applyRouteWeather(_ points: [RouteWeatherPoint], polyline: [GeoPoint] = []) {
+        routeWeatherPoints = points
+        routePolyline = polyline
         weatherChanges = RouteWeatherAnalyser.changes(current: currentWeather, along: points)
         refreshAnalysis()
+    }
+
+    // MARK: - Destination and route weather
+
+    /// Sets where the driver is going, and forecasts the road there.
+    ///
+    /// Clearing it drops the route forecast rather than leaving yesterday's rain on
+    /// screen: weather "ahead" of a destination that no longer applies is worse than
+    /// no forecast at all. Changing it does the same, for the same reason - the new
+    /// road may run the opposite way.
+    func setDestination(_ destination: RouteDestination?) {
+        // Whatever is in flight was fetched for the previous destination. The bump
+        // makes its result unpublishable; the cancel stops it doing the remaining work.
+        routeGeneration += 1
+        routeWeatherTask?.cancel()
+        routeWeatherTask = nil
+        nextRouteFetchAfter = nil
+
+        self.destination = destination
+        routeUnavailability = nil
+        // `weatherChanges` feeds insights, CarPlay and Today as well as this screen, so
+        // a stale entry here is a stale warning in four places.
+        weatherChanges = []
+        routeWeatherPoints = []
+        routePolyline = []
+        refreshAnalysis()
+
+        guard destination != nil else { return }
+        scheduleRouteWeatherRefresh(force: true)
+    }
+
+    /// Drops the destination when the drive it was set for is over.
+    ///
+    /// PRIVACY.md promises the destination lives no longer than the drive. Without this
+    /// the app keeps asking Apple for a route and a forecast every fifteen minutes, for
+    /// a destination the driver arrived at an hour ago, until the app is killed.
+    private func clearDestination() {
+        guard destination != nil else { return }
+        setDestination(nil)
+    }
+
+    /// Starts a refresh without blocking the caller, one at a time.
+    ///
+    /// Two refreshes in flight together would race, and the one that finishes last wins
+    /// regardless of which is newer or which destination it was for.
+    private func scheduleRouteWeatherRefresh(force: Bool = false) {
+        guard destination != nil else { return }
+        if force {
+            routeWeatherTask?.cancel()
+        } else {
+            guard routeWeatherTask == nil else { return }
+            // Checked here as well as inside, so the loop is not spawning a task per
+            // second only for it to return immediately.
+            if let next = nextRouteFetchAfter, Date() < next { return }
+        }
+
+        let generation = routeGeneration
+        routeWeatherTask = Task { [weak self] in
+            await self?.refreshRouteWeather(force: force)
+            guard let self, generation == self.routeGeneration else { return }
+            self.routeWeatherTask = nil
+        }
+    }
+
+    /// Re-measures how far ahead the route forecast is, without refetching it.
+    ///
+    /// At 100 km/h a driver covers 25 km between refreshes. Re-measuring is what stops
+    /// "rain about 20 km ahead" being shown after they have driven through it.
+    private func remeasureRouteWeather() {
+        guard !routeWeatherPoints.isEmpty,
+              !routePolyline.isEmpty,
+              let position = location.latest else { return }
+        let remaining = RouteWeatherAnalyser.remeasured(routeWeatherPoints,
+                                                       along: routePolyline,
+                                                       from: position)
+        weatherChanges = RouteWeatherAnalyser.changes(current: currentWeather, along: remaining)
+    }
+
+    /// What a refresh concluded, before any of it is published.
+    private enum RouteWeatherOutcome {
+        case forecast(points: [RouteWeatherPoint], polyline: [GeoPoint])
+        case unavailable(UnavailabilityReason)
+    }
+
+    /// Fetches the forecast at points spaced along the road to the destination.
+    ///
+    /// Runs at the weather interval rather than the drive loop's 1 Hz: a route forecast
+    /// that changed every second would be noise, and each refresh is several network
+    /// calls. The outcome is computed in full before anything is assigned, so a refresh
+    /// for a destination the driver has since changed is dropped whole rather than
+    /// half-applied on top of the new one.
+    func refreshRouteWeather(force: Bool = false) async {
+        guard destination != nil else { return }
+        let now = Date()
+        if !force, let next = nextRouteFetchAfter, now < next { return }
+        let generation = routeGeneration
+
+        let outcome = await routeWeatherOutcome(now: now)
+
+        // The driver changed or cleared the destination while this was in flight.
+        guard generation == routeGeneration else { return }
+
+        switch outcome {
+        case let .forecast(points, polyline):
+            routeUnavailability = points.isEmpty ? .offline : nil
+            applyRouteWeather(points, polyline: polyline)
+            nextRouteFetchAfter = now.addingTimeInterval(weatherInterval)
+        case let .unavailable(reason):
+            routeUnavailability = reason
+            // No forecast means no forecast - not the last one that happened to work.
+            routeWeatherPoints = []
+            routePolyline = []
+            weatherChanges = []
+            refreshAnalysis()
+            nextRouteFetchAfter = now.addingTimeInterval(
+                Self.isTransient(reason) ? routeRetryInterval : weatherInterval)
+        }
+    }
+
+    /// Whether a failure is worth retrying soon.
+    ///
+    /// A dropped connection or a missing fix clears by itself. An unconfigured weather
+    /// service, or a destination with no road to it, will not change until the driver
+    /// does something, so those wait for the normal interval.
+    private static func isTransient(_ reason: UnavailabilityReason) -> Bool {
+        switch reason {
+        case .offline, .waitingForLocationFix: return true
+        default: return false
+        }
+    }
+
+    private func routeWeatherOutcome(now: Date) async -> RouteWeatherOutcome {
+        guard let destination else { return .unavailable(.noDestination) }
+        guard weather.isConfigured else { return .unavailable(.weatherServiceUnconfigured) }
+        guard route.isAvailable else { return .unavailable(.routeUnavailable) }
+        // Without a fix there is no origin to route from. Naming which of the three
+        // reasons it is beats what this used to do: return silently, leaving the row
+        // populated and the forecast permanently, unexplainedly empty.
+        guard let origin = location.latest else {
+            return .unavailable(location.authorization.unavailabilityReason ?? .waitingForLocationFix)
+        }
+
+        do {
+            let polyline = try await route.polyline(from: origin, to: destination.point)
+            // The driver's own recent average, not a speed limit: how fast they will
+            // actually be at a point decides when they arrive there.
+            let speed = averageSpeedForRouteKmh()
+            let waypoints = RouteWeatherAnalyser.waypoints(along: polyline,
+                                                           from: now,
+                                                           averageSpeedKmh: speed)
+            guard !waypoints.isEmpty else { return .unavailable(.routeTooShortForForecast) }
+
+            var points: [RouteWeatherPoint] = []
+            for waypoint in waypoints {
+                let hours = max(1, Int(waypoint.expectedAt.timeIntervalSince(now) / 3_600) + 1)
+                let forecast = try await weather.hourlyForecast(at: waypoint.point, hours: hours)
+                // The hour the driver is expected there, not the nearest hour to now.
+                guard let snapshot = forecast.min(by: {
+                    abs($0.timestamp.timeIntervalSince(waypoint.expectedAt))
+                        < abs($1.timestamp.timeIntervalSince(waypoint.expectedAt))
+                }) else { continue }
+                points.append(RouteWeatherPoint(distanceMetres: waypoint.distanceMetres,
+                                                expectedAt: waypoint.expectedAt,
+                                                snapshot: snapshot))
+            }
+            return .forecast(points: points, polyline: polyline)
+        } catch let error as WeatherError {
+            return .unavailable(error == .offline ? .offline : .weatherServiceUnconfigured)
+        } catch RouteError.noRouteFound {
+            return .unavailable(.routeUnavailable)
+        } catch {
+            return .unavailable(.offline)
+        }
+    }
+
+    /// The speed used to work out when the driver reaches each waypoint.
+    ///
+    /// Prefers what the car is doing now, falls back to this drive's average, and
+    /// finally to a conservative figure. Never a guess dressed as a measurement — it
+    /// only decides which forecast hour to read.
+    private func averageSpeedForRouteKmh() -> Double {
+        if let live = obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 30, now: Date()), live > 15 {
+            return live
+        }
+        if let trip = currentTrip, let average = trip.averageSpeedKmh, average > 15 {
+            return average
+        }
+        return 45
     }
 
     /// Applies an elevation profile for the road ahead.

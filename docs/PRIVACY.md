@@ -105,3 +105,24 @@ stays on the device.
 - Upload telemetry silently. There is no upload path.
 - Require an account.
 - Track you between vehicles or across apps.
+
+
+## Destinations and route weather
+
+Setting a destination is the one thing in DriveLayer that sends a location to a
+server, and it only happens when a driver asks for it.
+
+- Searching for a place sends the typed text and a coarse region to Apple's search
+  service. Nothing about the search is stored — no history, no recent destinations.
+- Looking up the road to the chosen place sends the start and end coordinates to
+  Apple's directions service. DriveLayer keeps the returned geometry in memory to
+  sample weather along, and discards everything else the response carries.
+- The destination itself is held as a name and a coordinate, in memory, until the
+  driver clears it or the drive ends. It is never written to disk and never leaves
+  the device again.
+- The road is looked up again at most every fifteen minutes while a destination is
+  set, and after a failure at most every minute until one succeeds. It is not looked
+  up once per second alongside the rest of the drive loop.
+- With no destination set, none of this runs. The destination is dropped when the
+  drive ends, so lookups stop with it rather than continuing for as long as the app
+  is open.

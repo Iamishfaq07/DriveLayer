@@ -352,6 +352,100 @@ final class RouteWeatherTests: XCTestCase {
         XCTAssertEqual(WeatherSnapshot(timestamp: referenceDate).precipitationBand, .none,
                        "missing data is not rain")
     }
+
+    // MARK: - The horizon, and distances that keep up with the driver
+
+    /// A straight run north from the equator, a vertex roughly every 1.1 km.
+    private func straightPolyline(vertexCount: Int, stepDegrees: Double = 0.01) -> [GeoPoint] {
+        (0..<vertexCount).map { index in
+            GeoPoint(latitude: Double(index) * stepDegrees, longitude: 0, timestamp: referenceDate)
+        }
+    }
+
+    private func distanceAlong(_ polyline: [GeoPoint], to index: Int) -> Double {
+        guard index > 0 else { return 0 }
+        return (1...index).reduce(0.0) { $0 + Geo.distance(from: polyline[$1 - 1], to: polyline[$1]) }
+    }
+
+    func testWaypointsStopAtTheForecastHorizon() {
+        // About 340 km of road, against a horizon of 60 km.
+        let polyline = straightPolyline(vertexCount: 306)
+        let waypoints = RouteWeatherAnalyser.waypoints(along: polyline,
+                                                       from: referenceDate,
+                                                       averageSpeedKmh: 90)
+        XCTAssertFalse(waypoints.isEmpty)
+        XCTAssertLessThanOrEqual(waypoints.count, 6,
+                                 "one lookup per 10 km of the horizon, not of the whole road")
+        for waypoint in waypoints {
+            XCTAssertLessThanOrEqual(waypoint.distanceMetres, RouteWeatherAnalyser.horizonMetres,
+                                     "a waypoint past the horizon is a network call whose result changes() discards")
+        }
+    }
+
+    func testWaypointsStillReachTheHorizonTheyAreCappedAt() throws {
+        let polyline = straightPolyline(vertexCount: 306)
+        let waypoints = RouteWeatherAnalyser.waypoints(along: polyline,
+                                                       from: referenceDate,
+                                                       averageSpeedKmh: 90)
+        let furthest = try XCTUnwrap(waypoints.last)
+        XCTAssertGreaterThan(furthest.distanceMetres,
+                             RouteWeatherAnalyser.horizonMetres - 10_000,
+                             "capping must not cost the far end of the horizon")
+    }
+
+    func testRemeasuredSubtractsWhatTheDriverHasAlreadyCovered() throws {
+        let polyline = straightPolyline(vertexCount: 61)
+        let driverIndex = 18
+        let travelled = distanceAlong(polyline, to: driverIndex)
+        let points = [routePoint(30, condition: .rain, intensity: 4),
+                      routePoint(50, condition: .rain, intensity: 4)]
+
+        let remeasured = RouteWeatherAnalyser.remeasured(points,
+                                                        along: polyline,
+                                                        from: polyline[driverIndex])
+
+        XCTAssertEqual(remeasured.count, 2)
+        XCTAssertEqual(remeasured[0].distanceMetres, 30_000 - travelled, accuracy: 200)
+        XCTAssertEqual(remeasured[1].distanceMetres, 50_000 - travelled, accuracy: 200)
+        XCTAssertEqual(remeasured[0].snapshot, points[0].snapshot,
+                       "the distance is re-measured; the forecast is not re-invented")
+        XCTAssertEqual(remeasured[0].expectedAt, points[0].expectedAt)
+    }
+
+    func testRemeasuredDropsWhatIsAlreadyBehindTheDriver() {
+        let polyline = straightPolyline(vertexCount: 61)
+        let points = [routePoint(5, condition: .rain, intensity: 4),
+                      routePoint(40, condition: .rain, intensity: 4)]
+
+        // About 33 km along, so the 5 km point is well behind them.
+        let remeasured = RouteWeatherAnalyser.remeasured(points, along: polyline, from: polyline[30])
+
+        XCTAssertEqual(remeasured.count, 1, "rain already driven through is not rain ahead")
+        XCTAssertLessThan(remeasured[0].distanceMetres, 40_000)
+    }
+
+    func testRemeasuringIsWhatLetsTheTooCloseFilterFire() {
+        let clear = WeatherSnapshot(timestamp: referenceDate, condition: .clear,
+                                    temperatureC: 26, precipitationIntensityMillimetresPerHour: 0)
+        let polyline = straightPolyline(vertexCount: 61)
+        let points = [routePoint(20, condition: .rain, intensity: 4)]
+
+        // As fetched, with the driver at the start: rain 20 km ahead, worth saying.
+        XCTAssertFalse(RouteWeatherAnalyser.changes(current: clear, along: points).isEmpty)
+
+        // Now about 19 km along, so it is roughly 1 km away - inside
+        // minimumWarningDistanceMetres, where there is no useful action left to take.
+        let remeasured = RouteWeatherAnalyser.remeasured(points, along: polyline, from: polyline[17])
+        XCTAssertTrue(RouteWeatherAnalyser.changes(current: clear, along: remeasured).isEmpty,
+                      "a warning frozen at 20 km while the driver closes on it is a stale warning")
+    }
+
+    func testRemeasuredWithoutARouteLeavesThePointsAlone() {
+        let points = [routePoint(20, condition: .rain, intensity: 4)]
+        XCTAssertEqual(RouteWeatherAnalyser.remeasured(points, along: [], from: GeoPoint(
+            latitude: 0, longitude: 0, timestamp: referenceDate)), points,
+                       "no road to measure along is a reason to leave the numbers as they were")
+    }
 }
 
 final class CopilotTests: XCTestCase {

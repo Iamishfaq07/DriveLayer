@@ -35,6 +35,15 @@ enum UnavailabilityReason: Equatable, Sendable {
     case noVehicleSelected
     case notEnoughHistory(needed: Int, have: Int)
     case featureRequiresValidatedProfile
+    /// No destination set, or no road route to one.
+    case noDestination
+    case routeUnavailable
+    /// A route exists but is shorter than the spacing weather is sampled at, so
+    /// there is no "ahead" to forecast.
+    case routeTooShortForForecast
+    /// Location is permitted, but no fix has arrived yet. Distinct from a permission
+    /// problem: nothing is wrong and there is nothing for the driver to do.
+    case waitingForLocationFix
 
     var title: String {
         switch self {
@@ -48,6 +57,10 @@ enum UnavailabilityReason: Equatable, Sendable {
         case .noVehicleSelected: return "No vehicle selected"
         case .notEnoughHistory: return "Still learning your car"
         case .featureRequiresValidatedProfile: return "Not available for this vehicle"
+        case .noDestination: return "No destination set"
+        case .routeUnavailable: return "No route available"
+        case .routeTooShortForForecast: return "Too close to forecast"
+        case .waitingForLocationFix: return "Finding your location"
         }
     }
 
@@ -73,6 +86,14 @@ enum UnavailabilityReason: Equatable, Sendable {
             return "DriveLayer needs about \(needed) drives to learn what's normal for this car. It has \(have) so far."
         case .featureRequiresValidatedProfile:
             return "This needs vehicle-specific data that hasn't been validated for your car. DriveLayer won't guess."
+        case .noDestination:
+            return "Set where you're heading and DriveLayer will tell you what the weather does along the way."
+        case .routeUnavailable:
+            return "DriveLayer couldn't work out a road route to there, so it won't guess what the weather is along one."
+        case .routeTooShortForForecast:
+            return "The drive is short enough that the weather where you are is the weather when you arrive."
+        case .waitingForLocationFix:
+            return "Waiting for a GPS fix. This usually takes a few seconds outdoors."
         }
     }
 }

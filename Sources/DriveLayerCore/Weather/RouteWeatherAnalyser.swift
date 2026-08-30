@@ -113,10 +113,16 @@ enum RouteWeatherAnalyser {
 
     /// Builds route points by walking a polyline at the driver's current speed.
     /// Used to ask a provider for weather where the driver will actually be.
+    ///
+    /// Stops at `limitMetres`, which defaults to the same horizon `changes` filters to.
+    /// Walking the whole road instead would cost the caller one forecast lookup per
+    /// ten kilometres of it — thirty for a three-hundred-kilometre drive — and then
+    /// discard every result past the first sixty.
     static func waypoints(along polyline: [GeoPoint],
                           from now: Date,
                           averageSpeedKmh: Double,
-                          spacingMetres: Double = 10_000) -> [(point: GeoPoint, distanceMetres: Double, expectedAt: Date)] {
+                          spacingMetres: Double = 10_000,
+                          limitMetres: Double = horizonMetres) -> [(point: GeoPoint, distanceMetres: Double, expectedAt: Date)] {
         guard polyline.count >= 2, averageSpeedKmh > 5 else { return [] }
         var results: [(GeoPoint, Double, Date)] = []
         var cumulative: Double = 0
@@ -125,6 +131,7 @@ enum RouteWeatherAnalyser {
 
         for index in 1..<polyline.count {
             cumulative += Geo.distance(from: polyline[index - 1], to: polyline[index])
+            if cumulative > limitMetres { break }
             if cumulative >= nextTarget {
                 let seconds = cumulative / metresPerSecond
                 results.append((polyline[index], cumulative, now.addingTimeInterval(seconds)))
@@ -132,5 +139,53 @@ enum RouteWeatherAnalyser {
             }
         }
         return results.map { (point: $0.0, distanceMetres: $0.1, expectedAt: $0.2) }
+    }
+
+    /// Re-measures a route forecast against where the driver is now.
+    ///
+    /// The forecast behind these points is refetched every fifteen minutes; on a
+    /// motorway the driver covers twenty-five kilometres in that time. Left alone,
+    /// "rain about twenty kilometres ahead" stays on screen long after they have driven
+    /// through it, and `minimumWarningDistanceMetres` — which exists to drop warnings
+    /// too close to act on — never gets the chance to fire.
+    ///
+    /// Distance is re-measured *along the polyline*, not straight-line from the driver
+    /// to the point: on a road that bends back on itself the straight line is shorter
+    /// than the driving distance, and reporting that would be reporting a number the
+    /// driver cannot use. Points already behind the driver are dropped.
+    static func remeasured(_ points: [RouteWeatherPoint],
+                           along polyline: [GeoPoint],
+                           from position: GeoPoint) -> [RouteWeatherPoint] {
+        guard !points.isEmpty, polyline.count >= 2 else { return points }
+
+        // Cumulative distance to each vertex, on the same measure `waypoints` used, so
+        // subtracting one from the other is exact rather than approximate.
+        var cumulative: [Double] = [0]
+        cumulative.reserveCapacity(polyline.count)
+        for index in 1..<polyline.count {
+            cumulative.append(cumulative[index - 1] + Geo.distance(from: polyline[index - 1],
+                                                                   to: polyline[index]))
+        }
+
+        // How far along the road the driver has come: the nearest vertex to them.
+        // A vertex every few hundred metres is fine for a filter measured in kilometres.
+        var nearestIndex = 0
+        var nearestDistance = Double.greatestFiniteMagnitude
+        for (index, vertex) in polyline.enumerated() {
+            let distance = Geo.distance(from: position, to: vertex)
+            if distance < nearestDistance {
+                nearestDistance = distance
+                nearestIndex = index
+            }
+        }
+        let travelled = cumulative[nearestIndex]
+
+        return points.compactMap { point in
+            let remaining = point.distanceMetres - travelled
+            guard remaining > 0 else { return nil }
+            var moved = point
+            moved.distanceMetres = remaining
+            return moved
+        }
     }
 }

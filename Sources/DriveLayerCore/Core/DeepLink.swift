@@ -18,6 +18,13 @@ enum DeepLink: String, CaseIterable, Hashable, Sendable {
     case vehicle
 
     /// Screens reached by pushing onto a tab.
+    ///
+    /// `lastTrip` deliberately carries no identifier. The widget that uses it says
+    /// "open my last drive", and the app resolves which drive that is at the moment
+    /// it opens — so a drive finished since the widget last refreshed opens the new
+    /// one rather than a stale one, and no UUID has to survive a round trip through
+    /// a URL.
+    case lastTrip = "last-drive"
     case insights
     case fuel
     case maintenance

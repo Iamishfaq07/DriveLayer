@@ -103,15 +103,15 @@ enum DLColor {
     }
 
     // Surfaces. Dark mode is the primary case: this is an app used in a car at night.
-    static let background = dynamic(Palette.background)
-    static let surface = dynamic(Palette.surface)
-    static let surfaceRaised = dynamic(Palette.surfaceRaised)
+    static let background = dynamic { Palette.background($0) }
+    static let surface = dynamic { Palette.surface($0) }
+    static let surfaceRaised = dynamic { Palette.surfaceRaised($0) }
 
-    static let primaryText = dynamic(Palette.primaryText)
-    static let secondaryText = dynamic(Palette.secondaryText)
+    static let primaryText = dynamic { Palette.primaryText($0) }
+    static let secondaryText = dynamic { Palette.secondaryText($0) }
 
     /// The single accent, used for interactive elements only.
-    static let accent = dynamic(Palette.accent)
+    static let accent = dynamic { Palette.accent($0) }
 
     static let normal = status(.normal)
     static let watch = status(.watch)
