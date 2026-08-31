@@ -87,6 +87,12 @@ It takes about fifteen minutes. Apple then processes the build for another five
 to fifteen. When it appears in TestFlight, install it from the TestFlight app on
 your phone.
 
+**If it fails in the first minute, read the error and fix the secret it names.**
+Before building anything, the workflow opens your certificate and checks that it
+is a distribution certificate, that its private key is actually inside it, and
+that it has not expired — the mistakes that otherwise surface twelve minutes in,
+disguised as an export or signing bug. A fast failure is the cheap kind.
+
 **Internal testers need no review.** Add yourself as an internal tester and the
 build is installable as soon as processing finishes. External testers need a
 review pass, which is where background location will draw questions — you do not
