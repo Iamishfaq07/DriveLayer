@@ -34,13 +34,23 @@ At <https://developer.apple.com/account/resources/identifiers/list>:
 The App Group is not optional. It is how the widgets read the snapshot the app
 publishes; without it the widgets show placeholder data forever.
 
-On `com.drivelayer.app`, enable these capabilities:
+On `com.drivelayer.app`, enable **App Groups** and select
+`group.com.drivelayer.app`. On `com.drivelayer.app.widgets`, do the same.
 
-- **App Groups** — select `group.com.drivelayer.app`
-- **WeatherKit** — needed for current and route weather
-- **Background Modes** — location and Bluetooth are declared in `Info.plist`
+That is the whole list, because `DriveLayer.entitlements` requests exactly one
+thing. Signing checks the entitlements file against the App ID, so a capability
+the app does not claim buys nothing at this stage.
 
-On `com.drivelayer.app.widgets`, enable **App Groups** and select the same group.
+Two capabilities are worth understanding rather than ticking blindly:
+
+- **Background Modes** is not an App ID capability and never has been — do not go
+  looking for it in the portal. It is `UIBackgroundModes` in `Info.plist`, already
+  set to `location` and `bluetooth-central`.
+- **WeatherKit** can be enabled now, but it will not switch weather on. The
+  shipped entitlements do not request `com.apple.developer.weatherkit`, and
+  `Info.plist` carries `DLWeatherKitEnabled` set to `False`, so the app will
+  correctly report weather as not configured. Enabling it now costs nothing and
+  saves a step later; expecting weather from it will only waste your time.
 
 Do **not** enable CarPlay yet. See §6.
 
