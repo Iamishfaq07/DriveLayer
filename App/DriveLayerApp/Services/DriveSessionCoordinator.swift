@@ -486,6 +486,8 @@ final class DriveSessionCoordinator {
             // a comparison being invented.
             warmUpHistory: [],
             intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
+            fuelSystem: obd.telemetry.value(.fuelSystemStatusCode, freshWithin: 30, now: now)
+                .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
             profile: profile)
     }
 

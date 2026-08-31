@@ -110,6 +110,7 @@ enum HyperionGuardian {
                        peakIntakeDeltaC: Double? = nil,
                        warmUpHistory: [WarmUpObservation] = [],
                        intakeDeltaBaseline: MetricBaseline? = nil,
+                       fuelSystem: FuelSystemStatus = .unknown,
                        profile: VehicleProfile? = nil) -> HyperionAssessment {
 
         var sections: [HyperionSection] = []
@@ -159,9 +160,26 @@ enum HyperionGuardian {
         // The remaining areas are named here deliberately rather than omitted. Each one is
         // a written-down promise with a reason attached, which is harder to forget than a
         // gap and more honest than a reassuring blank.
-        sections.append(.notAssessed(.fuelSystem,
-                                     because: "Fuel trim intelligence needs fuel system status and trim PIDs "
-                                            + "confirmed on this car first."))
+        // Fuel system. The loop state is readable now; the trims that sit on top of it are
+        // not interpreted yet, and the section describes which of the two it is talking
+        // about rather than implying the whole area is covered.
+        if fuelSystem == .unknown {
+            sections.append(.notAssessed(.fuelSystem,
+                                         because: "This vehicle is not reporting a fuel system state "
+                                                + "DriveLayer recognises."))
+        } else {
+            var detail = fuelSystem.detail
+            if !fuelSystem.allowsFuelTrimComparison {
+                detail += " Fuel corrections are not compared against your baseline in this state."
+            }
+            sections.append(HyperionSection(area: .fuelSystem,
+                                            status: fuelSystem.status,
+                                            headline: fuelSystem.displayName,
+                                            detail: detail,
+                                            comparison: nil,
+                                            confidence: .high,
+                                            dataPoints: [.measured("Fuel loop", fuelSystem.displayName)]))
+        }
         sections.append(.notAssessed(.aftertreatment,
                                      because: "Catalyst readiness is read from standard monitors; direct filter "
                                             + "loading isn't exposed through OBD-II."))

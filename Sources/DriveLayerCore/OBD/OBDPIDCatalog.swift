@@ -195,6 +195,18 @@ enum OBDPIDCatalog {
                          plausibleRange: 0...65535, refresh: .rare,
                          decode: { .number(word($0)) }),
 
+        // Fuel system status. Added because fuel trim analysis is not safe without it:
+        // short- and long-term trim only describe anything while the engine is running
+        // closed loop on oxygen sensor feedback, and reading them during a cold start or at
+        // high load turns a normal operating mode into an invented problem.
+        //
+        // Two bytes, one status bitfield per fuel system. Only the first is decoded, which
+        // is the whole story on a single-bank engine like the Hyperion.
+        OBDPIDDescriptor(pid: .current(0x03), name: "Fuel system status", shortName: "Fuel loop",
+                         metric: .fuelSystemStatusCode, unitLabel: "", expectedByteCount: 2,
+                         plausibleRange: 0...16, refresh: .medium,
+                         decode: { .number(byteA($0)) }),
+
         OBDPIDDescriptor(pid: .current(0x2F), name: "Fuel tank level", shortName: "Fuel",
                          metric: .fuelLevelPercent, unitLabel: "%", expectedByteCount: 1,
                          plausibleRange: 0...100, refresh: .slow,

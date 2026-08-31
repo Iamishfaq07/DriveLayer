@@ -28,6 +28,7 @@ enum TelemetrySeriesCodec {
     /// Stable index order for the presence bitmask. Append-only.
     static let metricOrder: [VehicleMetric] = [
         .engineRPM,
+        .fuelSystemStatusCode,
         .vehicleSpeedKmh,
         .coolantTemperatureC,
         .engineLoadPercent,
