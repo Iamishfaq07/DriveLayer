@@ -208,6 +208,17 @@ actor OBDSession {
     ///
     /// A useful fallback when the vehicle doesn't report PID 42, but it is the
     /// adapter's measurement, not the ECU's — the basis string says so.
+    /// Reads monitor status structurally, self-test readiness included.
+    ///
+    /// A dedicated read rather than a decode of the telemetry value. Readiness lives in
+    /// bytes B to D of the response, and the telemetry channel carries one number per
+    /// metric -- so the value assembled from telemetry knows the lamp and the stored count
+    /// and genuinely does not know readiness. This is the path that does.
+    func readMonitorStatus() async -> MonitorStatus? {
+        guard let response = try? await request(.current(0x01)) else { return nil }
+        return MonitorStatus.decode(bytes: response.data)
+    }
+
     func readAdapterVoltage() async -> Provenanced<Double> {
         do {
             let reply = try await sendRaw(ATCommand.readVoltage.rawValue)

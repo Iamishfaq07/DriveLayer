@@ -120,6 +120,19 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
     case acceleratorPedalPercent
     case massAirFlowGramsPerSecond
     case timingAdvanceDegrees
+    /// The raw fuel system status bitfield from PID 03.
+    ///
+    /// Stored as its code rather than as a decoded state because telemetry is numeric all
+    /// the way through, and a bitfield is a number. `FuelSystemStatus.decode(code:)`
+    /// reconstructs the meaning wherever it is needed, which is cheaper than a parallel
+    /// channel for one PID.
+    case fuelSystemStatusCode
+    /// The lamp byte from PID 01: warning lamp in bit 7, stored fault count in bits 0-6.
+    ///
+    /// Numeric for the same reason as the fuel system code, and with the same consequence:
+    /// a change in this one number is what lets a stored-code refresh be triggered by the
+    /// car rather than by the driver opening a screen.
+    case monitorStatusCode
 
     var displayName: String {
         switch self {
@@ -150,6 +163,8 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .acceleratorPedalPercent: return "Accelerator pedal"
         case .massAirFlowGramsPerSecond: return "Mass air flow"
         case .timingAdvanceDegrees: return "Ignition timing"
+        case .fuelSystemStatusCode: return "Fuel system status"
+        case .monitorStatusCode: return "Monitor status"
         }
     }
 
@@ -172,6 +187,8 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .catalystTemperatureC, .oilTemperatureC: return "°C"
         case .massAirFlowGramsPerSecond: return "g/s"
         case .timingAdvanceDegrees: return "°"
+        case .fuelSystemStatusCode: return ""
+        case .monitorStatusCode: return ""
         }
     }
 }

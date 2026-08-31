@@ -110,6 +110,11 @@ enum HyperionGuardian {
                        peakIntakeDeltaC: Double? = nil,
                        warmUpHistory: [WarmUpObservation] = [],
                        intakeDeltaBaseline: MetricBaseline? = nil,
+                       fuelSystem: FuelSystemStatus = .unknown,
+                       monitorStatus: MonitorStatus? = nil,
+                       voltage: Provenanced<Double> = .unavailable(),
+                       isEngineRunning: Bool? = nil,
+                       voltageBaseline: MetricBaseline? = nil,
                        profile: VehicleProfile? = nil) -> HyperionAssessment {
 
         var sections: [HyperionSection] = []
@@ -159,33 +164,116 @@ enum HyperionGuardian {
         // The remaining areas are named here deliberately rather than omitted. Each one is
         // a written-down promise with a reason attached, which is harder to forget than a
         // gap and more honest than a reassuring blank.
-        sections.append(.notAssessed(.fuelSystem,
-                                     because: "Fuel trim intelligence needs fuel system status and trim PIDs "
-                                            + "confirmed on this car first."))
-        sections.append(.notAssessed(.aftertreatment,
-                                     because: "Catalyst readiness is read from standard monitors; direct filter "
-                                            + "loading isn't exposed through OBD-II."))
-        sections.append(.notAssessed(.battery,
-                                     because: "Voltage trends need a baseline built across several drives."))
-        sections.append(.notAssessed(.diagnostics,
-                                     because: "Structured monitor status isn't decoded yet."))
+        // Fuel system. The loop state is readable now; the trims that sit on top of it are
+        // not interpreted yet, and the section describes which of the two it is talking
+        // about rather than implying the whole area is covered.
+        if fuelSystem == .unknown {
+            sections.append(.notAssessed(.fuelSystem,
+                                         because: "This vehicle is not reporting a fuel system state "
+                                                + "DriveLayer recognises."))
+        } else {
+            var detail = fuelSystem.detail
+            if !fuelSystem.allowsFuelTrimComparison {
+                detail += " Fuel corrections are not compared against your baseline in this state."
+            }
+            sections.append(HyperionSection(area: .fuelSystem,
+                                            status: fuelSystem.status,
+                                            headline: fuelSystem.displayName,
+                                            detail: detail,
+                                            comparison: nil,
+                                            confidence: .high,
+                                            dataPoints: [.measured("Fuel loop", fuelSystem.displayName)]))
+        }
+        // Aftertreatment. Readiness is what standard OBD-II actually exposes about it, and
+        // saying only that is the honest answer: direct particulate filter loading is not a
+        // standard PID, and inventing a soot percentage would be worth less than the trust
+        // it cost. Petrol-side aftertreatment on this engine is a catalyst and a GPF.
+        if let readiness = monitorStatus?.readiness, readiness.supportedCount > 0 {
+            let complete = readiness.isComplete
+            sections.append(HyperionSection(
+                area: .aftertreatment,
+                // Incomplete self-tests are not a fault, only an absence of evidence.
+                status: complete ? .normal : .unknown,
+                headline: complete ? "System readiness complete" : "System readiness incomplete",
+                detail: complete
+                    ? "The vehicle has finished the self-tests it supports, emissions monitors "
+                    + "included. Direct filter loading is not available through standard OBD-II."
+                    : "The vehicle is still running its self-tests "
+                    + "(\(readiness.completeCount) of \(readiness.supportedCount) complete), which is "
+                    + "normal after a battery disconnect or a recent code clear. Direct filter "
+                    + "loading is not available through standard OBD-II.",
+                comparison: nil,
+                confidence: .high,
+                dataPoints: [
+                    .measured("Self-tests complete", "\(readiness.completeCount) of \(readiness.supportedCount)"),
+                    // Named and marked unavailable rather than omitted, so the absence is a
+                    // statement instead of a gap.
+                    InsightSourceDatum(label: "Direct filter loading",
+                                       formattedValue: "Not exposed by OBD-II",
+                                       provenance: .unavailable)
+                ]))
+        } else {
+            sections.append(.notAssessed(.aftertreatment,
+                                         because: "DriveLayer hasn't been able to read which emissions "
+                                                + "self-tests this vehicle has completed."))
+        }
+        let battery = BatteryIntelligence.assess(voltage: voltage,
+                                                 isEngineRunning: isEngineRunning,
+                                                 baseline: voltageBaseline,
+                                                 profile: profile)
+        if battery.isAvailable {
+            sections.append(HyperionSection(area: .battery,
+                                            status: battery.status,
+                                            headline: battery.headline,
+                                            detail: battery.detail
+                                                ?? "Voltage is within the band this engine should hold.",
+                                            comparison: nil,
+                                            confidence: battery.confidence,
+                                            dataPoints: battery.dataPoints))
+        } else {
+            sections.append(.notAssessed(.battery, because: battery.headline))
+        }
+        if let monitorStatus {
+            sections.append(HyperionSection(area: .diagnostics,
+                                            status: monitorStatus.status,
+                                            headline: monitorStatus.displayName,
+                                            detail: monitorStatus.detail,
+                                            comparison: nil,
+                                            confidence: .high,
+                                            dataPoints: [
+                                                .measured("Warning light",
+                                                          monitorStatus.isWarningLampOn ? "On" : "Off"),
+                                                .measured("Stored codes", "\(monitorStatus.confirmedFaultCount)")
+                                            ]))
+        } else {
+            // Said this way round on purpose. "No known codes" and "could not ask" are
+            // different statements, and only one of them is reassuring.
+            sections.append(.notAssessed(.diagnostics,
+                                         because: "DriveLayer hasn't been able to read the vehicle's "
+                                                + "self-test status."))
+        }
 
         let assessed = sections.filter(\.isAssessed)
-        // Unassessed areas are excluded on purpose. `unknown` outranks `normal` in a
-        // roll-up, so counting them would report the whole engine as unknown while every
-        // reading DriveLayer actually has says it is fine.
-        let overall = assessed.isEmpty ? .unknown : SemanticStatus.rollUp(assessed.map(\.status))
+        // Only areas that reached a judgement count towards the headline. `unknown` outranks
+        // `normal` in a roll-up, so including an area that looked and could not tell -- an
+        // emissions self-test still running, say -- would report the whole engine as unknown
+        // while every reading DriveLayer has says it is fine. The same reasoning excludes
+        // areas nobody has built yet, and it applies to both for the same reason.
+        let judged = assessed.filter { $0.status != .unknown }
+        let overall = judged.isEmpty ? .unknown : SemanticStatus.rollUp(judged.map(\.status))
 
         return HyperionAssessment(overall: overall,
                                   sections: sections,
-                                  summary: summarise(assessed: assessed, overall: overall))
+                                  summary: summarise(judged: judged, overall: overall))
     }
 
-    private static func summarise(assessed: [HyperionSection], overall: SemanticStatus) -> String {
-        guard !assessed.isEmpty else {
+    private static func summarise(judged: [HyperionSection], overall: SemanticStatus) -> String {
+        guard !judged.isEmpty else {
             return "DriveLayer isn't reading anything from the engine yet."
         }
-        let notable = assessed.filter { $0.status > .normal }
+        // Strictly worse than normal, and `judged` has already dropped the unknowns -- an
+        // area that could not tell is not something to point a driver at.
+        let notable = judged.filter { $0.status > .normal }
         guard !notable.isEmpty else {
             return "No unusual Hyperion behaviour detected in what DriveLayer can read so far."
         }
