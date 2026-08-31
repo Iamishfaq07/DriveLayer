@@ -35,6 +35,15 @@ enum OBDCapabilityDigest {
         /// Parameters the profile predicted but the car did not report. A non-empty
         /// list here means the profile is optimistic, which is worth knowing.
         var expectedButAbsent: [Entry]
+        /// Whether the profile predicted anything at all.
+        ///
+        /// Without this, a profile that predicts nothing is indistinguishable from a
+        /// profile whose every prediction came true — both leave `expectedButAbsent`
+        /// empty. The reference Harrier profile is deliberately in the first group
+        /// (`expectedStandardPIDs: []`, because no PID list has been verified for it),
+        /// so reporting "the profile matched the car" there would be a confident
+        /// statement about a comparison that never happened.
+        var profileMadePredictions: Bool
     }
 
     /// Bitmap-request codes (0x00, 0x20, …) are how a car is asked what it supports.
@@ -59,7 +68,8 @@ enum OBDCapabilityDigest {
         return Findings(
             interpreted: reported.intersection(decodable).sorted().map(entry),
             reportedButNotInterpreted: reported.subtracting(decodable).sorted().map(entry),
-            expectedButAbsent: expected.subtracting(reported).sorted().map(entry)
+            expectedButAbsent: expected.subtracting(reported).sorted().map(entry),
+            profileMadePredictions: !expected.isEmpty
         )
     }
 
@@ -113,7 +123,9 @@ enum OBDCapabilityDigest {
         lines.append(contentsOf: Self.section(
             "EXPECTED BY THE PROFILE BUT NOT REPORTED (\(found.expectedButAbsent.count))",
             found.expectedButAbsent,
-            empty: "  None — the profile matched the car."))
+            empty: found.profileMadePredictions
+                ? "  None — every parameter the profile predicted was present."
+                : "  The profile predicts no parameters, so there is nothing to compare against."))
 
         if !report.notes.isEmpty {
             lines.append("NOTES FROM DISCOVERY")

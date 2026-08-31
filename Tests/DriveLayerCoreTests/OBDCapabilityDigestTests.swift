@@ -42,17 +42,43 @@ final class OBDCapabilityDigestTests: XCTestCase {
 
     /// A profile that predicts more than the car delivers is the thing a first drive
     /// is meant to catch, so it has to be visible rather than silently dropped.
+    ///
+    /// Built from a profile of its own rather than the catalog's: the reference
+    /// Harrier deliberately predicts nothing (`expectedStandardPIDs: []`, because no
+    /// PID list has been verified for that engine), so it cannot exercise this path.
     func testParametersTheProfileExpectedButTheCarDidNotReportAreShown() throws {
-        let profile = try XCTUnwrap(harrier)
-        let expected = Set(profile.expectedStandardPIDs.filter { $0.mode == .currentData }
-            .compactMap(\.code))
-            .subtracting(Set(OBDPIDCatalog.supportedPIDRequestCodes))
-        XCTAssertFalse(expected.isEmpty, "the reference profile should predict some parameters")
+        var optimistic = try XCTUnwrap(harrier)
+        optimistic.expectedStandardPIDs = [.current(0x0C), .current(0x0D), .current(0x05)]
 
-        // A car that reports nothing at all: every prediction is a miss.
-        let found = OBDCapabilityDigest.findings(report: report(codes: []), profile: profile)
-        XCTAssertEqual(Set(found.expectedButAbsent.map(\.code)), expected)
-        XCTAssertTrue(found.interpreted.isEmpty)
+        // The car answers only one of the three the profile predicted.
+        let found = OBDCapabilityDigest.findings(report: report(codes: [0x0C]), profile: optimistic)
+        XCTAssertEqual(found.interpreted.map(\.code), [0x0C])
+        XCTAssertEqual(found.expectedButAbsent.map(\.code), [0x05, 0x0D])
+        XCTAssertTrue(found.profileMadePredictions)
+    }
+
+    /// The reference profile predicts nothing, which is not the same as every
+    /// prediction coming true — and both leave the list empty. Saying "the profile
+    /// matched the car" for a comparison that never happened is exactly the kind of
+    /// confident wrong sentence this app exists to avoid.
+    func testAProfileThatPredictsNothingIsNotReportedAsAMatch() throws {
+        let profile = try XCTUnwrap(harrier)
+        XCTAssertTrue(profile.expectedStandardPIDs.isEmpty,
+                      "the reference profile is expected to predict nothing; if that changed, this test should too")
+
+        let found = OBDCapabilityDigest.findings(report: report(codes: [0x0C]), profile: profile)
+        XCTAssertFalse(found.profileMadePredictions)
+        XCTAssertTrue(found.expectedButAbsent.isEmpty)
+
+        let text = OBDCapabilityDigest.text(report: report(codes: [0x0C]),
+                                            profile: profile,
+                                            capabilityLevel: .obdConnected,
+                                            adapterDescription: "ELM327 v1.5",
+                                            appVersion: "1.0 (1)",
+                                            generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertTrue(text.contains("nothing to compare against"))
+        XCTAssertFalse(text.contains("every parameter the profile predicted was present"),
+                       "a profile that predicted nothing must not be reported as having matched")
     }
 
     func testNothingIsExpectedWhenThereIsNoProfile() {
