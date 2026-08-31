@@ -72,6 +72,13 @@ targets:
         INFOPLIST_FILE: App/DriveLayerApp/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/DriveLayerApp/Resources/DriveLayer.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        # Left unset, XcodeGen omits ProvisioningStyle from the pbxproj entirely,
+        # which Xcode treats as manual signing with a development identity - even
+        # for a Release archive, and even with -allowProvisioningUpdates. That sent
+        # the TestFlight workflow looking for an "iOS Development" certificate while
+        # holding a correctly-verified Apple Distribution one. Automatic signing is
+        # what lets xcodebuild pick the right identity for the action it is running.
+        CODE_SIGN_STYLE: Automatic
     dependencies:
       - target: DriveLayerWidgets
         embed: true
@@ -99,6 +106,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/DriveLayerWidgets/DriveLayerWidgets.entitlements
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
 
   DriveLayerCoreTests:
     type: bundle.unit-test
