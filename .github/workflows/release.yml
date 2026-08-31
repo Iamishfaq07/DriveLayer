@@ -181,6 +181,13 @@ jobs:
           # -allowProvisioningUpdates with an API key lets Xcode create and fetch
           # the profiles for both the app and the widget extension, so no
           # provisioning profile has to be stored as a secret and kept in step.
+          # CODE_SIGN_STYLE: Automatic in project.yml is necessary but not
+          # sufficient. With no explicit identity hint, xcodebuild's automatic
+          # signing defaults to a *development* certificate even for a Release
+          # archive - this is what the first real run hit, twice, having gotten
+          # past every other check. Naming the identity explicitly is what tells
+          # -allowProvisioningUpdates to fetch a distribution profile instead of
+          # a development one.
           xcodebuild archive \
             -project DriveLayer.xcodeproj \
             -scheme DriveLayer \
@@ -192,6 +199,7 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
       - name: Export the IPA
