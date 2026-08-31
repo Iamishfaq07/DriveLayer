@@ -181,13 +181,20 @@ jobs:
           # -allowProvisioningUpdates with an API key lets Xcode create and fetch
           # the profiles for both the app and the widget extension, so no
           # provisioning profile has to be stored as a secret and kept in step.
-          # CODE_SIGN_STYLE: Automatic in project.yml is necessary but not
-          # sufficient. With no explicit identity hint, xcodebuild's automatic
-          # signing defaults to a *development* certificate even for a Release
-          # archive - this is what the first real run hit, twice, having gotten
-          # past every other check. Naming the identity explicitly is what tells
-          # -allowProvisioningUpdates to fetch a distribution profile instead of
-          # a development one.
+          # project.yml sets CODE_SIGN_STYLE: Automatic for local, IDE-driven
+          # development builds. It does not follow that xcodebuild picks a
+          # distribution identity for a Release archive on its own - two real
+          # runs confirmed Automatic alone resolves to Development every time,
+          # regardless of -configuration. A third real run then confirmed that
+          # naming the identity while still under Automatic does not steer that
+          # resolution either - Xcode calls it a conflict and says outright what
+          # it wants instead: "Set the code signing identity value to Apple
+          # Development... or switch to manual signing." Overriding
+          # CODE_SIGN_STYLE to Manual here is that switch, scoped to this one
+          # invocation, so the identity we supply is trusted rather than
+          # fought. No PROVISIONING_PROFILE_SPECIFIER is set on purpose:
+          # -allowProvisioningUpdates covers profile creation under manual
+          # signing too, which is the entire reason it takes an API key.
           xcodebuild archive \
             -project DriveLayer.xcodeproj \
             -scheme DriveLayer \
@@ -199,6 +206,7 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE="Manual" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
