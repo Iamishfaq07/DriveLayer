@@ -130,14 +130,19 @@ rather than a demo.
   connection under load. The parser is tested hard against malformed responses,
   but no test replaces a real one.
 - The Harrier's OBD support is unverified. **Settings → Capability levels** shows
-  what your car actually reports versus what DriveLayer can interpret — that
-  screen is the single most useful thing to send me after the first drive.
+  what your car actually reports versus what DriveLayer can interpret, and once
+  the adapter has connected that screen can **prepare a capability report** you
+  can share straight out of the app. That report is the single most useful thing
+  to send back after the first drive. It lists the parameters your car answered,
+  which of them DriveLayer could decode, and which the profile expected but the
+  car never offered — and it carries no location, journey or document data, which
+  is why it is a separate thing from the data export in Settings.
 - Weather stays "not configured" until WeatherKit is enabled on the App ID and a
   build carrying that capability is installed.
 - Baselines need several drives before insights say anything specific. A first
   drive reporting little is the design working, not a fault.
 
-**Worth capturing:** the Capability levels screen, anything in the Debug Center
+**Worth capturing:** the capability report above, anything in the Debug Center
 that looks wrong, and any number that seems implausible. A wrong number that
 looks confident is the most important bug class in this app.
 

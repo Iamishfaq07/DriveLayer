@@ -232,9 +232,76 @@ struct CapabilityLevelsView: View {
 
     @Environment(AppEnvironment.self) private var environment
 
+    @State private var reportURL: URL?
+    @State private var reportError: String?
+
     private var current: VehicleCapabilityLevel {
         VehicleCapabilityLevel.current(profile: environment.profile,
                                        isAdapterConnected: environment.obd.isConnected)
+    }
+
+    /// The app's own version, so a report that arrives weeks later can be placed.
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    /// Writing what the car actually reported, so it can be sent to someone.
+    ///
+    /// Separate from the data export in Settings deliberately: that one carries
+    /// trips, coordinates and scanned documents, which is far more than anyone needs
+    /// in order to answer "which parameters does a Harrier answer?".
+    @ViewBuilder
+    private var reportSection: some View {
+        Section("Send this back") {
+            if let capabilities = environment.obd.capabilities {
+                Button {
+                    writeReport(capabilities)
+                } label: {
+                    Label("Prepare a capability report", systemImage: "doc.text")
+                }
+                if let reportURL {
+                    ShareLink(item: reportURL) {
+                        Label("Share the report", systemImage: "square.and.arrow.up")
+                    }
+                }
+                Text("Lists what your car reported and what DriveLayer could interpret. No location, journey or document data is included.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Connect the adapter with the ignition on, and this becomes a report you can send.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let reportError {
+                Text(reportError)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.critical)
+            }
+        }
+    }
+
+    private func writeReport(_ capabilities: OBDCapabilityReport) {
+        let text = OBDCapabilityDigest.text(report: capabilities,
+                                            profile: environment.profile,
+                                            capabilityLevel: current,
+                                            adapterDescription: environment.obd.adapterIdentity,
+                                            appVersion: appVersion,
+                                            generatedAt: Date())
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DriveLayer-capability-report.txt")
+            try Data(text.utf8).write(to: url, options: [.atomic, .completeFileProtection])
+            reportError = nil
+            reportURL = url
+        } catch {
+            reportURL = nil
+            reportError = error.localizedDescription
+        }
     }
 
     var body: some View {
@@ -269,6 +336,7 @@ struct CapabilityLevelsView: View {
                     .font(DL.Font.caption)
                     .foregroundStyle(DLColor.secondaryText)
             }
+            reportSection
         }
         .navigationTitle("What DriveLayer can see")
         .navigationBarTitleDisplayMode(.inline)
