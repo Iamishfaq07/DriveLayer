@@ -2,8 +2,8 @@
 
 Maintained as work proceeds.
 
-**CI is green at `e2b3ed3`.** All four jobs pass: static checks, `swift build` +
-`swift test` (441 tests across 49 suites) on macOS, the app test target (40 tests
+**CI is green at `a597477`.** All four jobs pass: static checks, `swift build` +
+`swift test` (486 tests across 52 suites) on macOS, the app test target (40 tests
 across 6 suites), and an Xcode build of the app and widget extension for the iOS
 Simulator. What remains unverified needs hardware — see "Known gaps" at the end of
 this file.
@@ -179,7 +179,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 481 tests passing in CI at `e2b3ed3`: 441 via `swift test`, 40 in the app target. |
+| **Test execution** | 526 tests passing in CI at `a597477`: 486 via `swift test`, 40 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
