@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- How the archive is exported for TestFlight. The team ID is added by the
+	     release workflow from a secret: it identifies the developer account and
+	     does not belong in a public repository. -->
+	<key>method</key>
+	<string>app-store-connect</string>
+
+	<!-- Xcode fetches and renews the profiles for the app and the widget
+	     extension using the App Store Connect API key, so none has to be stored
+	     as a secret or kept in step by hand. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+
+	<!-- The upload is a separate, explicit step in the workflow, so the export
+	     stops at an .ipa. That keeps a failed upload from being indistinguishable
+	     from a failed build. -->
+	<key>destination</key>
+	<string>export</string>
+
+	<!-- Symbols go up with the build so a crash report from the car is readable
+	     rather than a wall of addresses. -->
+	<key>uploadSymbols</key>
+	<true/>
+
+	<!-- Bitcode has been dead since Xcode 14; saying so explicitly avoids a
+	     warning on every export. -->
+	<key>compileBitcode</key>
+	<false/>
+
+	<key>stripSwiftSymbols</key>
+	<true/>
+
+	<!-- Thin nothing: TestFlight wants the universal build. -->
+	<key>thinning</key>
+	<string>&lt;none&gt;</string>
+</dict>
+</plist>

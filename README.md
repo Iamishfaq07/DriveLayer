@@ -153,6 +153,18 @@ Tools/swiftcheck.py        Static consistency checker
 docs/                      Architecture, product, OBD, CarPlay, profiles, privacy, roadmap
 ```
 
+## Getting it on your phone
+
+`.github/workflows/release.yml` archives, signs and uploads a TestFlight build.
+It runs by hand from the Actions tab and takes everything Apple-specific from
+repository secrets — no team ID, certificate or key is committed.
+
+[RELEASE.md](docs/RELEASE.md) is the one-time setup: the Developer Program
+membership, the identifiers and App Group to register, the six secrets and where
+each comes from, and what to expect on the first real drive. CarPlay is not part
+of that build and cannot be until Apple grants the driving-task entitlement; the
+phone app in a mount does the same job in the meantime.
+
 ## Documentation
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit and why
