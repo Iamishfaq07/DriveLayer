@@ -488,8 +488,12 @@ final class DriveSessionCoordinator {
             intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
             fuelSystem: obd.telemetry.value(.fuelSystemStatusCode, freshWithin: 30, now: now)
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
-            monitorStatus: obd.telemetry.value(.monitorStatusCode, freshWithin: 120, now: now)
-                .flatMap { MonitorStatus.decode(code: $0) },
+            // The structured read first, because only it carries readiness. The telemetry
+            // value is the fallback: it is refreshed far more often, so it is the one that
+            // notices a lamp coming on between diagnostic reads.
+            monitorStatus: obd.monitorStatus
+                ?? obd.telemetry.value(.monitorStatusCode, freshWithin: 120, now: now)
+                    .flatMap { MonitorStatus.decode(code: $0) },
             voltage: provenancedReading(.controlModuleVoltageV, freshWithin: 600, now: now),
             isEngineRunning: obd.telemetry.isEngineRunning(now: now),
             // Engine-off first: resting voltage and charging voltage are different

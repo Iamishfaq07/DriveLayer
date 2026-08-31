@@ -114,6 +114,90 @@ final class HyperionGuardianTests: XCTestCase {
         XCTAssertTrue(assessment.summary.contains("isn't reading anything"))
     }
 
+    // MARK: - Aftertreatment, and the limits of OBD-II
+
+    private func complete() -> MonitorStatus {
+        MonitorStatus.decode(bytes: [0x00, 0x07, 0x01, 0x00])!
+    }
+
+    private func stillTesting() -> MonitorStatus {
+        MonitorStatus.decode(bytes: [0x00, 0x27, 0x00, 0x00])!
+    }
+
+    func testFinishedSelfTestsMakeAftertreatmentAssessable() throws {
+        let assessment = HyperionGuardian.assess(coolantC: .measured(92, at: start),
+                                                 monitorStatus: complete(),
+                                                 profile: harrier)
+        let section = try XCTUnwrap(assessment.section(.aftertreatment))
+        XCTAssertTrue(section.isAssessed)
+        XCTAssertEqual(section.status, .normal)
+    }
+
+    /// The line the brief is explicit about, and the one worth protecting: readiness is what
+    /// standard OBD-II exposes, filter loading is not, and saying so beats another number.
+    func testAftertreatmentSaysWhatOBDCannotTell() throws {
+        let assessment = HyperionGuardian.assess(coolantC: .measured(92, at: start),
+                                                 monitorStatus: complete(),
+                                                 profile: harrier)
+        let section = try XCTUnwrap(assessment.section(.aftertreatment))
+        XCTAssertTrue(section.detail.contains("not available through standard OBD-II"))
+
+        let loading = try XCTUnwrap(section.dataPoints.first { $0.label == "Direct filter loading" })
+        XCTAssertEqual(loading.provenance, .unavailable,
+                       "named and marked unavailable, so the absence is a statement not a gap")
+        for invented in ["soot", "%", "regeneration"] {
+            XCTAssertFalse(section.detail.lowercased().contains(invented),
+                           "filter loading is not exposed, so nothing may be implied about it")
+        }
+    }
+
+    /// An emissions monitor still running is an absence of evidence, not a fault -- and it
+    /// must not drag the engine headline down or appear as something to look at.
+    func testAnIncompleteSelfTestIsNotTreatedAsAConcern() throws {
+        let assessment = HyperionGuardian.assess(coolantC: .measured(92, at: start),
+                                                 intakeC: .measured(38, at: start),
+                                                 ambientC: 32,
+                                                 speedKmh: 70,
+                                                 monitorStatus: stillTesting(),
+                                                 profile: harrier)
+        let section = try XCTUnwrap(assessment.section(.aftertreatment))
+        XCTAssertEqual(section.status, .unknown)
+        XCTAssertTrue(section.isAssessed, "it was looked at; it simply could not tell")
+
+        XCTAssertEqual(assessment.overall, .normal,
+                       "an area that could not tell must not outrank areas that said fine")
+        XCTAssertFalse(assessment.summary.lowercased().contains("aftertreatment"),
+                       "and it must not be pointed at as though it were a finding")
+    }
+
+    func testALampByteAloneCannotAssessAftertreatment() throws {
+        // Assembled from the telemetry path, which carries no readiness. Diagnostics can be
+        // judged from it; aftertreatment cannot, and it says so rather than guessing.
+        let assessment = HyperionGuardian.assess(coolantC: .measured(92, at: start),
+                                                 monitorStatus: MonitorStatus.decode(lampByte: 0x00),
+                                                 profile: harrier)
+        XCTAssertEqual(assessment.section(.diagnostics)?.isAssessed, true)
+        XCTAssertEqual(assessment.section(.aftertreatment)?.isAssessed, false)
+    }
+
+    // MARK: - Full coverage
+
+    func testEveryAreaCanBeAssessedWhenTheCarReportsEverything() {
+        let assessment = HyperionGuardian.assess(coolantC: .measured(92, at: start),
+                                                 intakeC: .measured(38, at: start),
+                                                 ambientC: 32,
+                                                 speedKmh: 70,
+                                                 fuelSystem: .closedLoop,
+                                                 monitorStatus: complete(),
+                                                 voltage: .measured(13.8, at: start),
+                                                 isEngineRunning: true,
+                                                 profile: harrier)
+        XCTAssertEqual(assessment.assessedSections.count, HyperionSection.Area.allCases.count,
+                       "all six areas: \(assessment.sections.filter { !$0.isAssessed }.map(\.area))")
+        XCTAssertEqual(assessment.overall, .normal)
+        XCTAssertTrue(assessment.summary.contains("No unusual"))
+    }
+
     // MARK: - Provenance carried through
 
     func testASimulatedReadingKeepsItsProvenanceIntoTheAssessment() {

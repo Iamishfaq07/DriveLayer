@@ -372,15 +372,31 @@ happens with no request in flight, and the resulting `.notConnected` fails the
 |---|---|---|
 | P1-11 | Remove diesel product logic | ALREADY FIXED — unreachable on a petrol profile; see below |
 | P1-12 | Wire `HyperionGuardian` end to end | IMPLEMENTED — 2 of 6 areas assessed |
-| P1-13 | Structured fuel system status (`01 03`) | Not started |
+| P1-13 | Structured fuel system status (`01 03`) | IMPLEMENTED — PID was absent entirely |
 | P1-14 | Fuel trim intelligence | Not started · BLOCKED ON HARDWARE for the PIDs (V-4) |
 | P1-15 | Turbo and air, estimated boost | Not started · BLOCKED ON HARDWARE (V-6) |
 | P1-16 | Warm-up intelligence and history | PARTIAL — model wired, per-drive history not stored |
 | P1-17 | Heat soak | IMPLEMENTED — live through `HyperionGuardian` |
-| P1-18 | Battery trends | Not started |
-| P1-19 | MIL and DTC events | Not started |
-| P1-20 | Aftertreatment | Not started |
+| P1-18 | Battery trends | IMPLEMENTED — logic shared with the health view |
+| P1-19 | MIL and DTC events | IMPLEMENTED — a lamp change now reads the codes |
+| P1-20 | Aftertreatment | IMPLEMENTED — readiness only, by design |
 | P1-21 | Expanded contextual baselines | Not started |
+
+**All six Hyperion areas are now assessable**, and each still states why when it cannot be.
+The two rules the roll-up follows are tested, because both look right and read as broken if
+got wrong: an area nobody has built yet does not count towards the engine headline, and
+neither does an area that looked and could not tell. An emissions self-test still running is
+an absence of evidence, not a finding, so it neither drags the headline to unknown nor
+appears in the "worth a look" line.
+
+Aftertreatment reports self-test readiness and nothing else, deliberately. Readiness is what
+standard OBD-II exposes about a catalyst and a GPF; direct filter loading is not a standard
+PID. It is named in the evidence and marked unavailable rather than omitted, so the absence
+is a statement rather than a gap.
+
+Three of the four items built in this pass needed no vehicle, which was the sequencing
+intent: P1-14 and P1-15 rest on PIDs the Harrier may or may not answer, and building
+intelligence on an unconfirmed foundation is the thing this brief warns against.
 
 **P1-11 was verified rather than assumed, and the brief's premise did not hold.** No
 diesel content can reach a Harrier owner: `DieselGuardian.assess` guards on
