@@ -37,10 +37,20 @@ jobs:
           PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
         run: |
           # Fail here with a readable list rather than forty lines into xcodebuild.
+          #
+          # Report the name of the *secret* to create, not the variable it lands in.
+          # Someone reading this error is looking at the "New secret" page, where a
+          # name like CERT does not exist and cannot be acted on.
           missing=""
-          for name in TEAM_ID CERT CERT_PASSWORD KEY_ID ISSUER_ID PRIVATE_KEY; do
-            if [ -z "${!name}" ]; then missing="$missing $name"; fi
-          done
+          require() {  # $1 = env var to test, $2 = the repository secret that fills it
+            if [ -z "${!1}" ]; then missing="$missing $2"; fi
+          }
+          require TEAM_ID       APPLE_TEAM_ID
+          require CERT          BUILD_CERTIFICATE_BASE64
+          require CERT_PASSWORD P12_PASSWORD
+          require KEY_ID        APP_STORE_CONNECT_KEY_ID
+          require ISSUER_ID     APP_STORE_CONNECT_ISSUER_ID
+          require PRIVATE_KEY   APP_STORE_CONNECT_PRIVATE_KEY
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing"
             echo "See docs/RELEASE.md for how to create each one."
