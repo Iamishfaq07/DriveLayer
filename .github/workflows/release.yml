@@ -47,6 +47,78 @@ jobs:
             exit 1
           fi
 
+      - name: Check the certificate and key are usable
+        env:
+          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Never add `set -x` to this step. It handles a signing key, and tracing would
+          # print it into a log every collaborator can read.
+
+          P12="$RUNNER_TEMP/preflight.p12"
+          trap 'rm -f "$P12"' EXIT
+
+          fail() { echo "::error::$1"; shift; for line in "$@"; do echo "  $line"; done; exit 1; }
+
+          if ! printf '%s' "$CERT" | base64 --decode > "$P12" 2>/dev/null || [ ! -s "$P12" ]; then
+            fail "BUILD_CERTIFICATE_BASE64 is not valid base64." \
+                 "Re-run the base64 step and paste the whole file. See docs/RELEASE.md A4."
+          fi
+
+          # Opening the container proves the password matches and the file is really a .p12.
+          if ! openssl pkcs12 -in "$P12" -passin env:CERT_PASSWORD -nokeys -clcerts -noout 2>/dev/null; then
+            fail "The certificate could not be opened." \
+                 "Either P12_PASSWORD does not match, or BUILD_CERTIFICATE_BASE64 is not a .p12." \
+                 "If you built it with OpenSSL 3, see the -legacy note in docs/RELEASE.md Appendix A."
+          fi
+
+          # The key is counted while still encrypted, so it is never written in the clear.
+          keys="$(openssl pkcs12 -in "$P12" -passin env:CERT_PASSWORD -nocerts -passout pass:preflight 2>/dev/null \
+                  | grep -c 'BEGIN ENCRYPTED PRIVATE KEY' || true)"
+          if [ "${keys:-0}" -lt 1 ]; then
+            fail "The certificate has no private key in it." \
+                 "A .p12 exported without its key signs nothing. In Keychain Access, select the" \
+                 "certificate AND the key under it before exporting; with OpenSSL, pass -inkey." \
+                 "See docs/RELEASE.md Appendix A3."
+          fi
+
+          CERT_PEM="$RUNNER_TEMP/preflight.pem"
+          openssl pkcs12 -in "$P12" -passin env:CERT_PASSWORD -nokeys -clcerts 2>/dev/null > "$CERT_PEM"
+          subject="$(openssl x509 -in "$CERT_PEM" -noout -subject 2>/dev/null || true)"
+
+          case "$subject" in
+            *"Apple Distribution"*|*"iPhone Distribution"*)
+              echo "Certificate: distribution, good." ;;
+            *"Apple Development"*|*"iPhone Developer"*)
+              rm -f "$CERT_PEM"
+              fail "This is a development certificate, not a distribution one." \
+                   "It imports fine and then fails much later, during export, where it looks" \
+                   "like an export bug. Create an Apple Distribution certificate instead." \
+                   "See docs/RELEASE.md Appendix A2." ;;
+            *)
+              echo "::warning::Could not tell whether this is a distribution certificate." ;;
+          esac
+
+          if ! openssl x509 -in "$CERT_PEM" -checkend 0 -noout >/dev/null 2>&1; then
+            expiry="$(openssl x509 -in "$CERT_PEM" -noout -enddate 2>/dev/null | cut -d= -f2)"
+            rm -f "$CERT_PEM"
+            fail "The signing certificate expired on ${expiry:-an earlier date}." \
+                 "Apple will reject the upload. Issue a new distribution certificate and" \
+                 "replace BUILD_CERTIFICATE_BASE64."
+          fi
+          rm -f "$CERT_PEM"
+
+          case "$PRIVATE_KEY" in
+            *"BEGIN PRIVATE KEY"*) ;;
+            *) fail "APP_STORE_CONNECT_PRIVATE_KEY does not look like a .p8 key." \
+                    "Paste the whole downloaded file, including the BEGIN and END lines." ;;
+          esac
+
+          echo "Preflight passed: certificate opens, carries its key, is a distribution"
+          echo "certificate, has not expired, and the App Store Connect key is well formed."
+
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
