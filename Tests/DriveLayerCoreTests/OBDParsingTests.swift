@@ -141,9 +141,18 @@ final class OBDPIDDecodingTests: XCTestCase {
         XCTAssertEqual(try decode(0x0E, [0x00]).numericValue ?? 0, -64, accuracy: 0.001)
     }
 
-    func testMonitorStatusReportsWarningLamp() throws {
+    /// Deliberately changed: this used to assert a display string, which was all the
+    /// decoder produced. A string cannot be compared against the previous reading, so
+    /// nothing could notice the lamp coming on. It is now the lamp byte, and the meaning is
+    /// `MonitorStatus`'s job.
+    func testMonitorStatusReportsTheLampByteRatherThanAString() throws {
         let reading = try decode(0x01, [0x83, 0x07, 0xE5, 0x00])
-        XCTAssertEqual(reading.value, .text("MIL on, 3 stored"))
+        XCTAssertEqual(reading.value, .number(0x83))
+        XCTAssertEqual(reading.metric, .monitorStatusCode)
+
+        let status = try XCTUnwrap(MonitorStatus.decode(code: 0x83))
+        XCTAssertTrue(status.isWarningLampOn)
+        XCTAssertEqual(status.confirmedFaultCount, 3)
     }
 
     func testShortPayloadThrowsInsteadOfPaddingWithZero() {

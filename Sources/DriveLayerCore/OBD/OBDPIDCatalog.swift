@@ -126,14 +126,17 @@ enum OBDPIDCatalog {
     }()
 
     private static let decodedDescriptors: [OBDPIDDescriptor] = [
+        // Monitor status. Was decoded straight to a display string with `metric: nil`, so
+        // nothing downstream could act on it -- which is exactly why stored codes were read
+        // only on connect and on demand: there was no value to notice a change in.
+        //
+        // The lamp byte travels as a number so a change in it can trigger a refresh.
+        // Readiness lives in bytes B to D and does not fit a single numeric metric;
+        // `MonitorStatus.decode(bytes:)` reads all four for callers holding the raw frame.
         OBDPIDDescriptor(pid: .current(0x01), name: "Monitor status", shortName: "MIL",
-                         metric: nil, unitLabel: "", expectedByteCount: 4,
-                         plausibleRange: nil, refresh: .slow,
-                         decode: { data in
-                             let milOn = (data[0] & 0x80) != 0
-                             let count = Int(data[0] & 0x7F)
-                             return .text(milOn ? "MIL on, \(count) stored" : "MIL off, \(count) stored")
-                         }),
+                         metric: .monitorStatusCode, unitLabel: "", expectedByteCount: 4,
+                         plausibleRange: 0...255, refresh: .slow,
+                         decode: { .number(byteA($0)) }),
 
         OBDPIDDescriptor(pid: .current(0x04), name: "Calculated engine load", shortName: "Load",
                          metric: .engineLoadPercent, unitLabel: "%", expectedByteCount: 1,

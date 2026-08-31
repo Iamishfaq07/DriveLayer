@@ -111,6 +111,7 @@ enum HyperionGuardian {
                        warmUpHistory: [WarmUpObservation] = [],
                        intakeDeltaBaseline: MetricBaseline? = nil,
                        fuelSystem: FuelSystemStatus = .unknown,
+                       monitorStatus: MonitorStatus? = nil,
                        profile: VehicleProfile? = nil) -> HyperionAssessment {
 
         var sections: [HyperionSection] = []
@@ -185,8 +186,25 @@ enum HyperionGuardian {
                                             + "loading isn't exposed through OBD-II."))
         sections.append(.notAssessed(.battery,
                                      because: "Voltage trends need a baseline built across several drives."))
-        sections.append(.notAssessed(.diagnostics,
-                                     because: "Structured monitor status isn't decoded yet."))
+        if let monitorStatus {
+            sections.append(HyperionSection(area: .diagnostics,
+                                            status: monitorStatus.status,
+                                            headline: monitorStatus.displayName,
+                                            detail: monitorStatus.detail,
+                                            comparison: nil,
+                                            confidence: .high,
+                                            dataPoints: [
+                                                .measured("Warning light",
+                                                          monitorStatus.isWarningLampOn ? "On" : "Off"),
+                                                .measured("Stored codes", "\(monitorStatus.confirmedFaultCount)")
+                                            ]))
+        } else {
+            // Said this way round on purpose. "No known codes" and "could not ask" are
+            // different statements, and only one of them is reassuring.
+            sections.append(.notAssessed(.diagnostics,
+                                         because: "DriveLayer hasn't been able to read the vehicle's "
+                                                + "self-test status."))
+        }
 
         let assessed = sections.filter(\.isAssessed)
         // Unassessed areas are excluded on purpose. `unknown` outranks `normal` in a

@@ -488,6 +488,8 @@ final class DriveSessionCoordinator {
             intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
             fuelSystem: obd.telemetry.value(.fuelSystemStatusCode, freshWithin: 30, now: now)
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
+            monitorStatus: obd.telemetry.value(.monitorStatusCode, freshWithin: 120, now: now)
+                .flatMap { MonitorStatus.decode(code: $0) },
             profile: profile)
     }
 

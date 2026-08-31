@@ -29,6 +29,7 @@ enum TelemetrySeriesCodec {
     static let metricOrder: [VehicleMetric] = [
         .engineRPM,
         .fuelSystemStatusCode,
+        .monitorStatusCode,
         .vehicleSpeedKmh,
         .coolantTemperatureC,
         .engineLoadPercent,

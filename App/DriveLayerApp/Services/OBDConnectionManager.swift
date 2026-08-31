@@ -214,6 +214,9 @@ final class OBDConnectionManager {
                 // Source.isSimulated existed and was used only for display. This is the
                 // place it actually matters.
                 telemetry.apply(reading, provenance: source?.isSimulated == true ? .simulated : .measured)
+                if descriptor.metric == .monitorStatusCode, let code = reading.numericValue {
+                    noteMonitorStatus(code)
+                }
                 if !reading.isPlausible {
                     note("\(reading.name) returned an implausible value and was ignored.")
                 }
@@ -235,6 +238,33 @@ final class OBDConnectionManager {
     }
 
     // MARK: - Diagnostics
+
+    /// The lamp byte last seen, so a change in it can be acted on.
+    private var lastMonitorCode: Double?
+
+    /// Reads the stored codes when the vehicle's own summary of them changes.
+    ///
+    /// The lamp coming on, or the stored count moving, is the vehicle saying something new.
+    /// Until now the codes were read on connect and on demand only, so a fault appearing
+    /// mid-drive went unnoticed until the driver happened to open a screen — and the reason
+    /// was structural rather than an oversight: PID 01 decoded to a display string, and a
+    /// string cannot be compared against the previous one to notice a change.
+    ///
+    /// Only a lamp turning on or a count moving triggers a read. A lamp going *off* is not
+    /// chased, because mode 03 is a slow request and the interesting direction is the one
+    /// that has something to report.
+    private func noteMonitorStatus(_ code: Double) {
+        defer { lastMonitorCode = code }
+        guard let previous = lastMonitorCode, previous != code,
+              let new = MonitorStatus.decode(code: code),
+              let old = MonitorStatus.decode(code: previous) else { return }
+
+        let lampCameOn = new.isWarningLampOn && !old.isWarningLampOn
+        let countChanged = new.confirmedFaultCount != old.confirmedFaultCount
+        guard lampCameOn || countChanged else { return }
+
+        Task { await refreshTroubleCodes() }
+    }
 
     func refreshTroubleCodes() async {
         guard let session else { return }
