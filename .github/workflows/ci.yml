@@ -27,6 +27,37 @@ jobs:
       - name: Run swiftcheck
         run: python3 Tools/swiftcheck.py Sources Tests App
 
+      # The release workflow is run by hand, months apart, and a broken one is
+      # discovered by a failed TestFlight upload rather than by CI. actionlint
+      # checks the workflows themselves — expressions, contexts, action inputs —
+      # and shellcheck checks the bash inside every `run:` block, which is where
+      # the release workflow does its real work.
+      - name: Lint the workflows
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          # Published alongside the release. Pinning the hash as well as the
+          # version means a retagged or substituted asset fails the job rather
+          # than running as root in CI.
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          pip install --quiet shellcheck-py
+
+          # Downloaded outside the checkout, so the tool does not appear as an
+          # untracked file in the tree it is checking.
+          tools="$(mktemp -d)"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$tools/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  $tools/$archive" | sha256sum --check --status \
+            || { echo "::error::actionlint checksum mismatch"; exit 1; }
+          tar xzf "$tools/$archive" -C "$tools" actionlint
+
+          # Run from the repository root with no file arguments: actionlint finds
+          # .github/workflows itself, so a workflow added later is covered without
+          # editing this step.
+          "$tools/actionlint" -shellcheck "$(command -v shellcheck)"
+
   # The important one: this is where DriveLayerCore is actually compiled and the
   # test suite actually runs. The core is Foundation-only precisely so this job
   # needs no Xcode project, no simulator and no code signing.

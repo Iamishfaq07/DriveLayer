@@ -1,0 +1,177 @@
+name: TestFlight
+
+# Archives DriveLayer, signs it, and uploads it to TestFlight.
+#
+# Run it by hand from the Actions tab. It is deliberately not automatic: every
+# upload consumes a build number and notifies testers, and neither should happen
+# because someone merged a README change.
+#
+# Everything Apple-specific comes from repository secrets. Nothing about the
+# developer account is committed — no team ID, no certificate, no key. See
+# docs/RELEASE.md for how to produce each one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "Build number. Leave empty to use the workflow run number."
+        required: false
+        type: string
+
+jobs:
+  testflight:
+    name: Archive and upload
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the required secrets are present
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          # Fail here with a readable list rather than forty lines into xcodebuild.
+          missing=""
+          for name in TEAM_ID CERT CERT_PASSWORD KEY_ID ISSUER_ID PRIVATE_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            echo "See docs/RELEASE.md for how to create each one."
+            exit 1
+          fi
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Import the signing certificate
+        env:
+          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          # A throwaway keychain, unlocked only for this job. The runner is
+          # destroyed afterwards, but a keychain scoped to the job is still the
+          # right habit: nothing else on the machine can read the key.
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          echo -n "$CERT" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: Write the App Store Connect API key
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          # xcodebuild reads the key from a path; altool reads it from this
+          # well-known directory. Both get a copy.
+          mkdir -p "$RUNNER_TEMP/private_keys" ~/.appstoreconnect/private_keys
+          printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8"
+          cp "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
+             ~/.appstoreconnect/private_keys/"AuthKey_${KEY_ID}.p8"
+
+      - name: Archive
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+        run: |
+          set -o pipefail
+          # -allowProvisioningUpdates with an API key lets Xcode create and fetch
+          # the profiles for both the app and the widget extension, so no
+          # provisioning profile has to be stored as a secret and kept in step.
+          xcodebuild archive \
+            -project DriveLayer.xcodeproj \
+            -scheme DriveLayer \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/DriveLayer.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+
+      - name: Export the IPA
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          # The team ID is the one value ExportOptions.plist cannot carry, since
+          # it must not be committed.
+          /usr/libexec/PlistBuddy -c "Delete :teamID" Config/ExportOptions.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" Config/ExportOptions.plist
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/DriveLayer.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist Config/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+
+      - name: Upload to TestFlight
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          IPA="$(find "$RUNNER_TEMP/export" -maxdepth 1 -name '*.ipa' | head -1)"
+          if [ -z "$IPA" ]; then
+            echo "::error::No .ipa was produced by the export step."
+            exit 1
+          fi
+          echo "Uploading $(basename "$IPA")"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
+
+      - name: Keep the IPA and the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drivelayer-ipa
+          path: |
+            ${{ runner.temp }}/export/*.ipa
+            ${{ runner.temp }}/export/*.plist
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Say what happens next
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ### Uploaded to App Store Connect
+
+          Processing usually takes 5-15 minutes. The build appears in TestFlight
+          once it finishes, and internal testers can install it immediately after
+          that — no review needed.
+
+          CarPlay will **not** work in this build unless Apple has granted the
+          driving-task entitlement and docs/CARPLAY.md's two edits are applied.
+          The phone app is unaffected.
+          SUMMARY
