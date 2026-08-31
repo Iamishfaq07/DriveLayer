@@ -112,6 +112,9 @@ enum HyperionGuardian {
                        intakeDeltaBaseline: MetricBaseline? = nil,
                        fuelSystem: FuelSystemStatus = .unknown,
                        monitorStatus: MonitorStatus? = nil,
+                       voltage: Provenanced<Double> = .unavailable(),
+                       isEngineRunning: Bool? = nil,
+                       voltageBaseline: MetricBaseline? = nil,
                        profile: VehicleProfile? = nil) -> HyperionAssessment {
 
         var sections: [HyperionSection] = []
@@ -184,8 +187,22 @@ enum HyperionGuardian {
         sections.append(.notAssessed(.aftertreatment,
                                      because: "Catalyst readiness is read from standard monitors; direct filter "
                                             + "loading isn't exposed through OBD-II."))
-        sections.append(.notAssessed(.battery,
-                                     because: "Voltage trends need a baseline built across several drives."))
+        let battery = BatteryIntelligence.assess(voltage: voltage,
+                                                 isEngineRunning: isEngineRunning,
+                                                 baseline: voltageBaseline,
+                                                 profile: profile)
+        if battery.isAvailable {
+            sections.append(HyperionSection(area: .battery,
+                                            status: battery.status,
+                                            headline: battery.headline,
+                                            detail: battery.detail
+                                                ?? "Voltage is within the band this engine should hold.",
+                                            comparison: nil,
+                                            confidence: battery.confidence,
+                                            dataPoints: battery.dataPoints))
+        } else {
+            sections.append(.notAssessed(.battery, because: battery.headline))
+        }
         if let monitorStatus {
             sections.append(HyperionSection(area: .diagnostics,
                                             status: monitorStatus.status,

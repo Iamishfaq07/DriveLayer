@@ -120,44 +120,25 @@ enum VehicleHealthEvaluator {
                                    detail: nil, dataPoints: points, unavailability: nil)
     }
 
+    /// Delegates to `BatteryIntelligence`, which is the same logic this function used to
+    /// hold inline. Moved so the Hyperion assessment and this view cannot drift into
+    /// disagreeing about the same car -- the failure mode this project already has an
+    /// example of, in coolant.
     private static func battery(_ context: InsightContext) -> VehicleHealthSystem {
-        guard let voltage = context.value(.controlModuleVoltageV, freshWithin: 600) else {
-            return VehicleHealthSystem(kind: .battery, status: .unknown,
-                                       headline: context.isAdapterConnected
-                                           ? "This vehicle doesn't report system voltage"
-                                           : "Connect an adapter to see battery voltage",
-                                       detail: nil, dataPoints: [],
-                                       unavailability: context.isAdapterConnected
-                                           ? .pidNotSupportedByVehicle("Control module voltage")
-                                           : .obdNotConnected)
-        }
+        let voltage = context.value(.controlModuleVoltageV, freshWithin: 600)
+        let assessment = BatteryIntelligence.assess(
+            voltage: voltage.map { .measured($0, at: context.now) } ?? .unavailable(),
+            isEngineRunning: context.telemetry?.isEngineRunning(now: context.now),
+            baseline: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff),
+            profile: context.profile,
+            isAdapterConnected: context.isAdapterConnected)
 
-        let isRunning = context.telemetry?.isEngineRunning(now: context.now)
-        let condition: OperatingCondition = isRunning == false ? .engineOff : .engineRunning
-        var status = context.profile?.operatingRange(for: .controlModuleVoltageV, condition: condition)?
-            .status(for: voltage) ?? .unknown
-        var points: [InsightSourceDatum] = [.measured("Voltage", String(format: "%.2f V", voltage))]
-        var detail: String?
-
-        if let baseline = context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff), baseline.isEstablished {
-            points.append(.measured("Your usual", String(format: "%.2f V", baseline.median)))
-            if let trend = baseline.trendOverWindow, trend <= -0.2 {
-                status = max(status, .watch)
-                detail = String(format: "Trending about %.2f V lower over %d days.", trend, baseline.windowDays)
-                points.append(.estimated("Trend", String(format: "%.2f V / %d days", trend, baseline.windowDays)))
-            }
-        }
-
-        let headline: String
-        switch status {
-        case .normal: headline = "Charging and resting voltage look normal"
-        case .watch: headline = "Voltage is drifting from your usual"
-        case .attention, .critical: headline = "Voltage is outside the normal band"
-        case .unknown: headline = "Not enough information to judge"
-        }
-
-        return VehicleHealthSystem(kind: .battery, status: status, headline: headline,
-                                   detail: detail, dataPoints: points, unavailability: nil)
+        return VehicleHealthSystem(kind: .battery,
+                                   status: assessment.status,
+                                   headline: assessment.headline,
+                                   detail: assessment.detail,
+                                   dataPoints: assessment.dataPoints,
+                                   unavailability: assessment.unavailability)
     }
 
     private static func fuelSystem(_ context: InsightContext) -> VehicleHealthSystem {

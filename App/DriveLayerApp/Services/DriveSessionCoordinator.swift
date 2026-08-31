@@ -490,6 +490,13 @@ final class DriveSessionCoordinator {
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
             monitorStatus: obd.telemetry.value(.monitorStatusCode, freshWithin: 120, now: now)
                 .flatMap { MonitorStatus.decode(code: $0) },
+            voltage: provenancedReading(.controlModuleVoltageV, freshWithin: 600, now: now),
+            isEngineRunning: obd.telemetry.isEngineRunning(now: now),
+            // Engine-off first: resting voltage and charging voltage are different
+            // measurements, and the engine-off baseline is the one that says anything about
+            // the battery rather than about the alternator.
+            voltageBaseline: baselines[BaselineKey(metric: .controlModuleVoltageV, context: .engineOff)]
+                ?? baselines[BaselineKey(metric: .controlModuleVoltageV, context: .any)],
             profile: profile)
     }
 
