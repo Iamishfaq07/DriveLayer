@@ -63,7 +63,7 @@ struct TelemetryJournal: Sendable {
             try data.write(to: url, options: [.atomic])
             return true
         } catch {
-            PrivacyLog.logger(.persistence).error("Could not append a telemetry chunk")
+            PrivacyLog.error(.persistence, "Could not append a telemetry chunk")
             return false
         }
     }
@@ -120,7 +120,7 @@ struct TelemetryJournal: Sendable {
         where url.pathExtension == "dlts" {
             guard let data = try? Data(contentsOf: url),
                   let decoded = try? TelemetrySeriesCodec.decode(data) else {
-                PrivacyLog.logger(.persistence).error("Skipped an unreadable telemetry chunk")
+                PrivacyLog.error(.persistence, "Skipped an unreadable telemetry chunk")
                 continue
             }
             samples.append(contentsOf: decoded)
@@ -176,7 +176,7 @@ struct TelemetryJournal: Sendable {
             discard(vehicleID: vehicleID, tripID: tripID)
             return true
         } catch {
-            PrivacyLog.logger(.persistence).error("Could not compact telemetry; chunks kept for recovery")
+            PrivacyLog.error(.persistence, "Could not compact telemetry; chunks kept for recovery")
             return false
         }
     }
@@ -271,7 +271,7 @@ struct TelemetryJournal: Sendable {
                 try fileManager.removeItem(at: url)
                 removed += 1
             } catch {
-                PrivacyLog.logger(.persistence).error("Could not prune an expired telemetry file")
+                PrivacyLog.error(.persistence, "Could not prune an expired telemetry file")
             }
         }
         return removed
