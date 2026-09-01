@@ -23,6 +23,24 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
+	<!-- Declares up front that this build contains no non-exempt encryption, so App
+	     Store Connect stops asking the export-compliance question on every upload.
+	     Answering it by hand each time is a step that gets skipped or answered
+	     wrongly in a hurry.
+
+	     False is the accurate answer, and it was checked rather than assumed: the app
+	     implements no cryptography at all - no CryptoKit, no CommonCrypto, no SecKey,
+	     no AES or SHA, and no third-party packages that could bring any in. The only
+	     encryption anywhere near it is iOS file protection on stored documents and
+	     telemetry, which is the operating system encrypting data at rest and is
+	     explicitly exempt.
+
+	     This has to be revisited if that ever stops being true - notably if cloud
+	     sync (V3, opt-in and encrypted) is ever built, which would change the
+	     answer. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 	<!-- The icon lives in Assets.xcassets. This key names the icon set inside it and
 	     is what App Store validation looks for: an app built against the iOS 11+ SDK
 	     is rejected without it, whatever the catalog contains. -->
