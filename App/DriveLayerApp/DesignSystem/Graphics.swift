@@ -158,6 +158,83 @@ struct FillBar: View {
     }
 }
 
+/// A drive's shape, drawn from its route, at thumbnail size.
+///
+/// Every trip already carried a polyline that was rendered nowhere. Drawn small, it
+/// gives each row in the list a shape - the commute is a recognisable squiggle, the
+/// motorway run a long line - and that is what lets a driver find a drive by looking
+/// rather than by reading dates. Axis-free and unlabelled on purpose: it is a glyph,
+/// not a map, and it leaks nothing about where the drive actually was.
+///
+/// A trip with fewer than two points draws a dot, which is the honest shape of a
+/// drive that recorded no movement.
+struct RouteGlyph: View {
+
+    let points: [Trip.RoutePoint]
+    var tint: Color = DLColor.accent
+    var lineWidth: CGFloat = 2
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scaled = normalised(in: proxy.size)
+            if scaled.count >= 2 {
+                Path { path in
+                    path.move(to: scaled[0])
+                    for point in scaled.dropFirst() { path.addLine(to: point) }
+                }
+                .stroke(LinearGradient(colors: [tint.opacity(0.45), tint],
+                                       startPoint: .leading, endPoint: .trailing),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                // The end of the drive gets a dot, so direction is legible.
+                Circle()
+                    .fill(tint)
+                    .frame(width: lineWidth * 2.2, height: lineWidth * 2.2)
+                    .position(scaled[scaled.count - 1])
+            } else {
+                Circle()
+                    .fill(tint.opacity(0.6))
+                    .frame(width: lineWidth * 2.5, height: lineWidth * 2.5)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Fits the route into the box, preserving aspect ratio, with a little inset so the
+    /// round line caps are not clipped. Longitude is scaled by cos(latitude) so a
+    /// north-south drive and an east-west drive of the same length look the same length.
+    private func normalised(in size: CGSize) -> [CGPoint] {
+        // Thin the polyline: a thumbnail does not need every one-second point, and
+        // several hundred segments in a 44pt box is wasted work on every list scroll.
+        let stride = max(1, points.count / 60)
+        let sampled = Swift.stride(from: 0, to: points.count, by: stride).map { points[$0] }
+            + (points.count > 1 && (points.count - 1) % stride != 0 ? [points[points.count - 1]] : [])
+        guard sampled.count >= 2,
+              let minLat = sampled.map(\.latitude).min(), let maxLat = sampled.map(\.latitude).max(),
+              let minLon = sampled.map(\.longitude).min(), let maxLon = sampled.map(\.longitude).max()
+        else { return [] }
+
+        let midLat = (minLat + maxLat) / 2
+        let lonScale = cos(midLat * .pi / 180)
+        let spanX = max((maxLon - minLon) * lonScale, 0.000_01)
+        let spanY = max(maxLat - minLat, 0.000_01)
+
+        let inset = lineWidth * 1.5
+        let boxW = size.width - inset * 2
+        let boxH = size.height - inset * 2
+        let scale = min(boxW / spanX, boxH / spanY)
+        let drawnW = spanX * scale
+        let drawnH = spanY * scale
+        let offsetX = inset + (boxW - drawnW) / 2
+        let offsetY = inset + (boxH - drawnH) / 2
+
+        return sampled.map { point in
+            CGPoint(x: offsetX + (point.longitude - minLon) * lonScale * scale,
+                    y: offsetY + (maxLat - point.latitude) * scale)   // north up
+        }
+    }
+}
+
 /// The background behind every screen: not a flat colour but a dark field with one
 /// soft highlight near the top. This is the "instrument panel at night" the design
 /// system describes and never actually drew. The highlight takes the vehicle's status
