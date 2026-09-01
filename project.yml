@@ -61,8 +61,19 @@ targets:
       - path: Sources/DriveLayerCore
       - path: App/DriveLayerApp
       - path: App/Shared
-    info:
-      path: App/DriveLayerApp/Resources/Info.plist
+    # No `info:` block, and that is deliberate. XcodeGen's `info:` key is a
+    # *generator*: given a path it writes a plist there from its own defaults plus
+    # whatever `properties:` lists, overwriting whatever was on disk. With no
+    # `properties:` it replaced this project's hand-written Info.plist with a
+    # near-empty one on every `xcodegen generate`.
+    #
+    # TestFlight is what exposed it. Apple rejected the upload for missing
+    # UILaunchScreen, missing UISupportedInterfaceOrientations and a missing
+    # CFBundleIconName - all while those keys sat plainly in the committed file. The
+    # plist Apple validated was not the plist in the repository.
+    #
+    # INFOPLIST_FILE below is the whole of what is needed: it tells the build which
+    # file to use, and nothing then rewrites it.
     entitlements:
       path: App/DriveLayerApp/Resources/DriveLayer.entitlements
     settings:
@@ -70,6 +81,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app
         PRODUCT_NAME: DriveLayer
         INFOPLIST_FILE: App/DriveLayerApp/Resources/Info.plist
+        # The asset catalog carries the icon. Both settings are required: the
+        # catalog names the icon set, and CFBundleIconName in the built plist is
+        # what App Store validation actually looks for.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: App/DriveLayerApp/Resources/DriveLayer.entitlements
         GENERATE_INFOPLIST_FILE: NO
         # Automatic here, in `base`, is for the IDE: opening the project on a Mac
@@ -121,8 +136,10 @@ targets:
       - path: Sources/DriveLayerCore/Core/SemanticStatus.swift
       - path: Sources/DriveLayerCore/Core/PrivacyLog.swift
       - path: Sources/DriveLayerCore/Core/DeepLink.swift
-    info:
-      path: App/DriveLayerWidgets/Info.plist
+    # Same reason as the app target: no `info:` block, or the generator overwrites
+    # the extension's plist. Here the casualty was NSExtensionPointIdentifier, and
+    # an app extension without it is not a widget as far as Apple is concerned -
+    # which is exactly what the upload said.
     entitlements:
       path: App/DriveLayerWidgets/DriveLayerWidgets.entitlements
     settings:
