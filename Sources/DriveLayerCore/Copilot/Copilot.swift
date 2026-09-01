@@ -104,7 +104,9 @@ struct LocalCopilot: CopilotProviding, Sendable {
             case .lastService: return ["service", "serviced", "maintenance", "due"]
             case .regenerationHistory: return ["regeneration", "regen", "dpf", "particulate", "soot"]
             case .troubleCodeMeaning: return ["what does", "code mean", "dtc", "fault code", "error code"]
-            case .monthComparison: return ["compared", "last month", "changed", "versus", "vs last"]
+            // "compare with usual" is how the example question puts it; the test that
+            // every example routes to an intent is what found this missing.
+            case .monthComparison: return ["compared", "compare", "last month", "changed", "versus", "vs last", "with usual", "than usual"]
             }
         }
     }
