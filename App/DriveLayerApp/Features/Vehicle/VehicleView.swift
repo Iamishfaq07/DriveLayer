@@ -45,20 +45,48 @@ struct VehicleContentView: View {
     private var headlineSection: some View {
         if let health = drive.health {
             Section {
-                VStack(alignment: .leading, spacing: DL.Spacing.small) {
-                    HStack(spacing: DL.Spacing.small) {
-                        StatusIndicator(status: health.overall, showsLabel: false, size: 22)
+                HStack(alignment: .center, spacing: DL.Spacing.medium) {
+                    StatusRing(status: health.overall, size: 72, lineWidth: 6)
+                    VStack(alignment: .leading, spacing: DL.Spacing.hairline) {
                         Text(health.headline)
-                            .dlFont(.display)
+                            .dlFont(.display, weight: .semibold)
                             .foregroundStyle(DLColor.primaryText)
-                    }
-                    if health.isLimitedByMissingData {
-                        Text("Some systems can't be assessed right now, so this is a partial picture.")
-                            .font(DL.Font.callout)
-                            .foregroundStyle(DLColor.secondaryText)
+                            .contentTransition(.interpolate)
+                        if health.isLimitedByMissingData {
+                            Text("Some systems can't be assessed right now, so this is a partial picture.")
+                                .font(DL.Font.callout)
+                                .foregroundStyle(DLColor.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                .padding(.vertical, DL.Spacing.tight)
+                .padding(.vertical, DL.Spacing.small)
+                .accessibilityElement(children: .combine)
+            }
+            .listRowBackground(Color.clear)
+
+            Section {
+                NavigationLink(value: DeepLink.hyperion) {
+                    HStack(spacing: DL.Spacing.small) {
+                        Image(systemName: "engine.combustion")
+                            .foregroundStyle(drive.hyperion.isSilent ? DLColor.unknown : DLColor.status(drive.hyperion.overall))
+                            .frame(width: 26)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hyperion")
+                                .font(DL.Font.body.weight(.medium))
+                                .foregroundStyle(DLColor.primaryText)
+                            Text(drive.hyperion.isSilent ? "Not reading the engine yet" : drive.hyperion.summary)
+                                .font(DL.Font.callout)
+                                .foregroundStyle(DLColor.secondaryText)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        if !drive.hyperion.isSilent {
+                            StatusIndicator(status: drive.hyperion.overall, showsLabel: false, size: 17)
+                        }
+                    }
+                    .padding(.vertical, DL.Spacing.hairline)
+                }
             }
         }
     }

@@ -39,6 +39,36 @@ struct TripDetailView: View {
 
     private var overviewSection: some View {
         Section {
+            // The drive's shape, large. The list row shows it at 44pt; here it is the
+            // hero, because the shape of a drive is the fastest way to recognise it and
+            // the only view of the route that leaks no location. The start and end
+            // place names sit beneath, if they were resolved.
+            if trip.routePolyline.count >= 2 {
+                VStack(alignment: .leading, spacing: DL.Spacing.small) {
+                    RouteGlyph(points: trip.routePolyline, lineWidth: 3)
+                        .frame(height: 140)
+                        .frame(maxWidth: .infinity)
+                    if trip.startPlaceName != nil || trip.endPlaceName != nil {
+                        HStack(spacing: DL.Spacing.tight) {
+                            Text(trip.startPlaceName ?? "Start")
+                                .lineLimit(1)
+                            Image(systemName: "arrow.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(DLColor.unknown)
+                                .accessibilityHidden(true)
+                            Text(trip.endPlaceName ?? "End")
+                                .lineLimit(1)
+                        }
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.secondaryText)
+                    }
+                }
+                .padding(.vertical, DL.Spacing.small)
+                .listRowBackground(Color.clear)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text(routeAccessibilityLabel))
+            }
+
             DLAdaptiveRow {
                 MetricView(label: "Distance",
                            value: formatter.distance(metres: trip.distanceMetres),
@@ -62,6 +92,18 @@ struct TripDetailView: View {
                              unit: formatter.speedUnitLabel,
                              reason: "Not recorded")
         }
+    }
+
+    /// What VoiceOver says for the route glyph, which is otherwise a silent drawing.
+    private var routeAccessibilityLabel: String {
+        var parts = ["Route shape"]
+        if let start = trip.startPlaceName, let end = trip.endPlaceName {
+            parts.append("from \(start) to \(end)")
+        }
+        if let distance = formatter.distance(metres: trip.distanceMetres) {
+            parts.append("\(distance) \(formatter.distanceUnitLabel)")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var efficiencySection: some View {

@@ -15,11 +15,18 @@ struct RootView: View {
     /// Navigation paths live here rather than inside each tab, because a deep link
     /// arriving from a widget has to be able to set them from outside.
     @State private var todayPath: [DeepLink] = []
+    @State private var hyperionPath: [DeepLink] = []
     @State private var tripsPath: [DeepLink] = []
     @State private var vehiclePath: [DeepLink] = []
 
+    /// Five tabs, with Hyperion the third.
+    ///
+    /// It earned a tab by being the product: the whole intelligence layer exists to
+    /// produce the assessment that screen shows, and until now it reached the phone
+    /// through a single card and CarPlay through a single row. The Vehicle tab stays,
+    /// because health-as-systems and the glovebox are still things a driver opens.
     enum Tab: Hashable {
-        case today, drive, trips, vehicle
+        case today, drive, hyperion, trips, vehicle
     }
 
     var body: some View {
@@ -35,6 +42,13 @@ struct RootView: View {
                     .tabItem { Label("Drive", systemImage: "steeringwheel") }
                     .tag(Tab.drive)
 
+                NavigationStack(path: $hyperionPath) {
+                    HyperionView()
+                        .deepLinkDestinations()
+                }
+                .tabItem { Label("Hyperion", systemImage: "engine.combustion") }
+                .tag(Tab.hyperion)
+
                 TripsListView(path: $tripsPath)
                     .tabItem { Label("Trips", systemImage: "map") }
                     .tag(Tab.trips)
@@ -43,6 +57,8 @@ struct RootView: View {
                     .tabItem { Label("Vehicle", systemImage: "car") }
                     .tag(Tab.vehicle)
             }
+            .tint(DLColor.accent)
+            .sensoryFeedback(.selection, trigger: selection)
             .onChange(of: selection) { _, newValue in
                 // Location fidelity follows what the driver is actually looking at.
                 environment.drive.setDriveScreenVisible(newValue == .drive)
@@ -63,6 +79,7 @@ struct RootView: View {
         selection = route.tab
         switch route.tab {
         case .today: todayPath = route.path
+        case .hyperion: hyperionPath = route.path
         case .trips: tripsPath = route.path
         case .vehicle: vehiclePath = route.path
         case .drive: break // Drive Mode is one screen; there is nothing to push onto it.

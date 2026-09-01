@@ -453,8 +453,27 @@ Route terrain is **MOCK ONLY**: `MockElevationProvider` is the sole conformer of
 
 ## P3 — surfaces and scale
 
-Not started: CarPlay cleanup, Ask Harrier, the real-car capability scan, PID Lab, Debug
-Center expansion, performance and soak testing, UI polish.
+| Item | Status |
+|---|---|
+| Hyperion as a primary surface | **IMPLEMENTED** — its own tab, an overall ring, six expandable cards with reasoning and evidence, a learning card. `HyperionAssessment` was previously read by one CarPlay row and nothing on the phone. |
+| Ask Harrier | **IMPLEMENTED** — wording, conversation behaviour, and a `HyperionSummary` in the copilot context built from the same assessment the screen shows. Four new intents (turbo, fuel system, warm-up, faults) answer from it; baseline comparisons are labelled inferences, low confidence is a stated limitation, unassessed areas explain why. `dieselAssessment` remains in the context for the dormant diesel path and is unreachable on a petrol profile. |
+| Design system: material, motion, graphics | **IMPLEMENTED** — one card material with light, edge and depth; one spring for everything that enters; `StatusRing`, `LiveDot`, `FillBar`, `RollingNumber`, `RouteGlyph`, `PanelBackground`, `RoadMark`. Reduce Motion drops every translation and keeps every fade. |
+| Trips: route glyphs | **IMPLEMENTED** — every drive draws its own shape at 44pt in the list and 140pt in detail; the polyline was previously stored and rendered nowhere. |
+| Drive Mode controls | **IMPLEMENTED** — 56pt primary buttons with haptic release, replacing 34pt stock buttons as the two most-tapped targets in a car. |
+| CarPlay cleanup, capability scan, PID Lab, Debug Center expansion, soak testing | Not started. |
+
+What "UI polish" turned out to mean, concretely: the design system described a calm
+instrument panel and drew a spreadsheet. A card was a flat fill in a rounded rectangle,
+there was one animation in the whole app, and every headline judgement was a 20pt
+symbol beside a word. The fix was systemic - a material, a motion system, and a
+graphical vocabulary applied everywhere - rather than screen by screen, because
+screen-by-screen is how an app ends up looking like six different apps.
+
+Two real bugs fell out of it. In `TelemetryDetailView`, fuel trims fell through to the
+percent formatter and lost their sign and decimal, and manifold pressure rendered as
+"101 %". And CI's push trigger named branch prefixes and silently skipped `feature/**`,
+the second time that list had caught its own author in a day; it now matches every
+branch.
 
 CarPlay is **BLOCKED ON ENTITLEMENT** and stays that way: the code is complete and needs
 Apple's driving-task entitlement plus the two edits documented in

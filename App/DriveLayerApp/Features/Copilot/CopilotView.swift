@@ -19,23 +19,40 @@ struct CopilotView: View {
         var answer: CopilotAnswer
     }
 
+    @FocusState private var isComposing: Bool
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: DL.Spacing.medium) {
-                        if exchanges.isEmpty { suggestions }
-                        ForEach(exchanges) { exchange in
-                            ExchangeView(exchange: exchange)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: DL.Spacing.medium) {
+                            if exchanges.isEmpty { suggestions }
+                            ForEach(exchanges) { exchange in
+                                ExchangeView(exchange: exchange)
+                                    .id(exchange.id)
+                                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                            removal: .opacity))
+                            }
                         }
+                        .dlScreenPadding()
+                        .padding(.vertical, DL.Spacing.medium)
+                        // An anchor below the last answer, so the scroll lands with the
+                        // answer's bottom edge just above the input rather than its top
+                        // edge under the navigation bar.
+                        Color.clear.frame(height: 1).id("bottom")
                     }
-                    .dlScreenPadding()
-                    .padding(.vertical, DL.Spacing.medium)
+                    // The answer used to appear below the fold with nothing to say it
+                    // had. Scrolling to it is the difference between a conversation and
+                    // a form that quietly grew a row.
+                    .onChange(of: exchanges.count) { _, _ in
+                        withAnimation(DL.Motion.arrive) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
                 }
                 inputBar
             }
-            .background(DLColor.background)
-            .navigationTitle("Copilot")
+            .background(PanelBackground())
+            .navigationTitle("Ask Harrier")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -47,61 +64,97 @@ struct CopilotView: View {
 
     private var suggestions: some View {
         VStack(alignment: .leading, spacing: DL.Spacing.small) {
-            Text("Ask about your car")
-                .font(DL.Font.title)
-                .foregroundStyle(DLColor.primaryText)
-            Text("Answers come from what DriveLayer has actually recorded. When it doesn't know something, it says so.")
-                .font(DL.Font.callout)
-                .foregroundStyle(DLColor.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-            ForEach(LocalCopilot.exampleQuestions, id: \.self) { example in
+            VStack(alignment: .leading, spacing: DL.Spacing.tight) {
+                Text("Ask about your Harrier")
+                    .dlFont(.display, weight: .semibold)
+                    .foregroundStyle(DLColor.primaryText)
+                Text("Answers come from what DriveLayer has actually recorded. When it doesn't know something, it says so.")
+                    .font(DL.Font.callout)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, DL.Spacing.small)
+            .dlArrive(index: 0)
+
+            ForEach(Array(LocalCopilot.exampleQuestions.enumerated()), id: \.element) { index, example in
                 Button {
                     ask(example)
                 } label: {
-                    HStack {
+                    HStack(spacing: DL.Spacing.small) {
+                        Image(systemName: "bubble.left")
+                            .font(.callout)
+                            .foregroundStyle(DLColor.accent)
+                            .accessibilityHidden(true)
                         Text(example)
-                            .font(DL.Font.callout)
+                            .font(DL.Font.body)
+                            .foregroundStyle(DLColor.primaryText)
                             .multilineTextAlignment(.leading)
-                        Spacer()
+                        Spacer(minLength: 0)
                         Image(systemName: "arrow.up.right")
-                            .font(.caption)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(DLColor.unknown)
+                            .accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .dlCard(padding: DL.Spacing.small)
+                    .dlCard(padding: DL.Spacing.small + 2)
                 }
-                .buttonStyle(.plain)
+                .dlPressable()
+                .dlArrive(index: index + 1)
             }
         }
     }
 
     private var inputBar: some View {
-        HStack(spacing: DL.Spacing.small) {
-            TextField("Ask about your car", text: $question, axis: .vertical)
+        HStack(alignment: .bottom, spacing: DL.Spacing.small) {
+            TextField("Ask about your Harrier", text: $question, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...3)
-                .padding(.horizontal, DL.Spacing.small)
-                .padding(.vertical, DL.Spacing.tight)
-                .background(DLColor.surfaceRaised, in: RoundedRectangle(cornerRadius: DL.Radius.small))
+                .focused($isComposing)
+                .padding(.horizontal, DL.Spacing.medium)
+                .padding(.vertical, DL.Spacing.small)
+                .background(DLColor.surfaceRaised, in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(isComposing ? DLColor.accent.opacity(0.6) : .clear, lineWidth: 1)
+                )
+                .animation(DL.Motion.quick, value: isComposing)
                 .onSubmit { ask(question) }
             Button {
                 ask(question)
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
+                Image(systemName: "arrow.up")
+                    .font(.body.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(canSend ? DLColor.accent : DLColor.unknown, in: Circle())
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(!canSend)
+            .animation(DL.Motion.quick, value: canSend)
+            .sensoryFeedback(.impact(weight: .light), trigger: exchanges.count)
+            .accessibilityLabel("Ask")
         }
-        .padding(DL.Spacing.small)
-        .background(DLColor.surface)
+        .padding(.horizontal, DL.Spacing.medium)
+        .padding(.vertical, DL.Spacing.small)
+        .background(
+            // The bar sits on the same material as a card, edge included, so the
+            // bottom of the screen has a floor rather than a colour change.
+            Rectangle()
+                .fill(DLColor.surface)
+                .overlay(alignment: .top) { Divider().opacity(DL.Opacity.separator) }
+                .ignoresSafeArea(edges: .bottom)
+        )
     }
+
+    private var canSend: Bool { !question.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func ask(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let snapshot = environment.drive.copilotSnapshot()
         let answer = LocalCopilot.respond(to: trimmed, snapshot: snapshot)
-        exchanges.append(Exchange(question: trimmed, answer: answer))
+        withAnimation(DL.Motion.arrive) {
+            exchanges.append(Exchange(question: trimmed, answer: answer))
+        }
         question = ""
     }
 }

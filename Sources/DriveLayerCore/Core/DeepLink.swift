@@ -26,6 +26,9 @@ enum DeepLink: String, CaseIterable, Hashable, Sendable {
     /// a URL.
     case lastTrip = "last-drive"
     case insights
+    /// The engine intelligence screen. Added when the screen was: `HyperionAssessment`
+    /// existed and was read by one CarPlay row, with nothing on the phone to open.
+    case hyperion
     case fuel
     case maintenance
     case documents

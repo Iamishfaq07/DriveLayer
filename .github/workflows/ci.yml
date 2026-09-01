@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    # `fix/**` is here because it was not, and the omission was quiet: a push to a
-    # branch outside this list ran nothing at all, and the only reason it was not
-    # missed is that `pull_request` below is unrestricted, so CI started when the
-    # PR was opened. Naming branch prefixes at all is a trap of this shape; these
-    # are the three the project actually uses.
-    branches: [main, "claude/**", "fix/**", "harrier/**"]
+    # Every branch. This used to name prefixes - main, claude/**, then fix/** and
+    # harrier/** once those were found missing - and the list caught its own author
+    # twice: a push to a branch outside it ran nothing, quietly, and was only noticed
+    # because the unrestricted pull_request trigger started CI when the PR opened.
+    # The only branch that should not trigger CI is one nobody pushes.
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 

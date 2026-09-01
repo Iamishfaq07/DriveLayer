@@ -72,6 +72,36 @@ struct VehicleContextSnapshot: Sendable, Equatable {
         var hasDirectFilterData: Bool
     }
 
+    /// What DriveLayer makes of the Hyperion engine, condensed for a conversation.
+    ///
+    /// Built from the same `HyperionAssessment` the Hyperion screen and CarPlay read, so
+    /// the copilot cannot say something the screen does not. Each area is one sentence -
+    /// the headline and, where there is one, the comparison against this car's baseline -
+    /// and never a reading. No raw telemetry reaches this type, which is the rule the
+    /// whole snapshot exists to enforce.
+    struct HyperionSummary: Sendable, Equatable {
+        struct Area: Sendable, Equatable {
+            var name: String
+            var status: String
+            var headline: String
+            var comparison: String?
+            var confidence: String
+            /// Set when the area could not be assessed, with the reason. The copilot
+            /// says "I can't tell" and why, rather than falling silent about the area.
+            var notAssessedReason: String?
+        }
+
+        var overall: String
+        var summary: String
+        var areas: [Area]
+        var assessedCount: Int
+        var isSilent: Bool
+
+        func area(named name: String) -> Area? {
+            areas.first { $0.name.lowercased() == name.lowercased() }
+        }
+    }
+
     // Defaults let a caller build a partial snapshot: a phone-only vehicle genuinely
     // has no fuel or health section, and the copilot must handle that.
     var generatedAt: Date
@@ -86,6 +116,7 @@ struct VehicleContextSnapshot: Sendable, Equatable {
     var maintenance: MaintenanceSummary?
     var weather: WeatherSummary?
     var diesel: DieselSummary?
+    var hyperion: HyperionSummary?
     var recentInsights: [String] = []
     var activeTroubleCodes: [String] = []
     var batteryBaselineV: Double?
@@ -96,9 +127,13 @@ struct VehicleContextSnapshot: Sendable, Equatable {
 /// Builds the snapshot from the same context the insight engine uses.
 enum CopilotContextBuilder {
 
+    /// - Parameter hyperion: the current engine assessment. Passed alongside rather than
+    ///   through `InsightContext` because it is a product of analysis, not an input to it,
+    ///   and the copilot is the third consumer of it after the Hyperion screen and CarPlay.
     static func build(from context: InsightContext,
                       health: VehicleHealthReport?,
                       insights: [DriveInsight],
+                      hyperion: HyperionAssessment? = nil,
                       calendar: Calendar = .current) -> VehicleContextSnapshot {
 
         let vehicleSummary = context.vehicle.map { vehicle in
@@ -164,11 +199,31 @@ enum CopilotContextBuilder {
                     hasDirectFilterData: assessment.dpf.hasAnyValue
                 )
             },
+            hyperion: hyperion.map(summarise),
             recentInsights: insights.prefix(5).map { "\($0.title): \($0.summary)" },
             activeTroubleCodes: context.troubleCodes.map(\.code),
             batteryBaselineV: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.median,
             batteryTrendVPerWindow: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.trendOverWindow,
             isDriving: context.isDriving
+        )
+    }
+
+    /// Condenses the assessment to sentences. Data points are deliberately dropped: the
+    /// snapshot carries judgements, and the readings behind them stay on the screen.
+    static func summarise(_ assessment: HyperionAssessment) -> VehicleContextSnapshot.HyperionSummary {
+        VehicleContextSnapshot.HyperionSummary(
+            overall: assessment.overall.label,
+            summary: assessment.summary,
+            areas: assessment.sections.map { section in
+                .init(name: section.area.displayName,
+                      status: section.status.label,
+                      headline: section.headline,
+                      comparison: section.comparison,
+                      confidence: section.confidence.displayName,
+                      notAssessedReason: section.notAssessedReason)
+            },
+            assessedCount: assessment.assessedSections.count,
+            isSilent: assessment.isSilent
         )
     }
 

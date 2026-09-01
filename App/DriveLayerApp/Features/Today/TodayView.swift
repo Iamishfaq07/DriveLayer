@@ -17,6 +17,12 @@ struct TodayView: View {
     private var formatter: DisplayFormatter { environment.formatter }
     private var drive: DriveSessionCoordinator { environment.drive }
 
+    /// The status the whole screen is coloured by, faintly, at its top edge. Health
+    /// first because it is the broader judgement; Hyperion when health has nothing.
+    private var screenStatus: SemanticStatus? {
+        drive.health?.overall ?? (drive.hyperion.isSilent ? nil : drive.hyperion.overall)
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
@@ -25,17 +31,18 @@ struct TodayView: View {
                         DLUnavailableState(reason: .noVehicleSelected)
                             .padding(.top, DL.Spacing.section)
                     } else {
-                        header
-                        healthCard
-                        quickFacts
-                        insightsSection
-                        nextServiceSection
+                        header.dlArrive(index: 0)
+                        healthCard.dlArrive(index: 1)
+                        hyperionCard.dlArrive(index: 2)
+                        quickFacts.dlArrive(index: 3)
+                        insightsSection.dlArrive(index: 4)
+                        nextServiceSection.dlArrive(index: 5)
                     }
                 }
                 .dlScreenPadding()
                 .padding(.vertical, DL.Spacing.medium)
             }
-            .background(DLColor.background)
+            .background(PanelBackground(statusTint: screenStatus.map(DLColor.status)))
             .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -66,7 +73,7 @@ struct TodayView: View {
             Button {
                 isShowingCopilot = true
             } label: {
-                Label("Ask copilot", systemImage: "bubble.left.and.text.bubble.right")
+                Label("Ask Harrier", systemImage: "bubble.left.and.text.bubble.right")
             }
         }
     }
@@ -79,12 +86,33 @@ struct TodayView: View {
                 .font(DL.Font.callout)
                 .foregroundStyle(DLColor.secondaryText)
             Text(environment.selectedVehicle?.nickname ?? "DriveLayer")
-                .dlFont(.display)
+                .dlFont(.display, weight: .semibold)
                 .foregroundStyle(DLColor.primaryText)
-            Text(readinessLine)
-                .font(DL.Font.callout)
-                .foregroundStyle(DLColor.secondaryText)
+            HStack(spacing: DL.Spacing.tight) {
+                // A breathing dot while recording, a steady one while connected, none
+                // otherwise: the readiness line's meaning, carried in the periphery.
+                if drive.isRecording {
+                    LiveDot(isLive: true, tint: DLColor.critical)
+                } else if environment.obd.isConnected {
+                    LiveDot(isLive: false, tint: DLColor.normal)
+                }
+                Text(readinessLine)
+                    .font(DL.Font.callout)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .contentTransition(.interpolate)
+            }
+            .animation(DL.Motion.standard, value: drive.isRecording)
         }
+    }
+
+    /// The engine intelligence, one card, opening to the full screen. Present even
+    /// while silent, because a home screen that hides Hyperion until an adapter is
+    /// connected never teaches the driver it exists.
+    private var hyperionCard: some View {
+        NavigationLink(value: DeepLink.hyperion) {
+            HyperionSummaryCard(assessment: drive.hyperion)
+        }
+        .dlPressable()
     }
 
     /// The line under the vehicle name. It says what DriveLayer can currently see,
@@ -104,29 +132,34 @@ struct TodayView: View {
     private var healthCard: some View {
         if let health = drive.health {
             NavigationLink(value: DeepLink.vehicle) {
-                VStack(alignment: .leading, spacing: DL.Spacing.small) {
-                    SectionLabel(text: "Vehicle")
-                    HStack(spacing: DL.Spacing.small) {
-                        StatusIndicator(status: health.overall, showsLabel: false, size: 20)
+                HStack(alignment: .center, spacing: DL.Spacing.medium) {
+                    // The ring is the headline. A 20pt symbol beside a word was correct
+                    // and invisible; this is the one judgement the screen is about.
+                    StatusRing(status: health.overall, size: 64, lineWidth: 6)
+                    VStack(alignment: .leading, spacing: DL.Spacing.hairline) {
+                        SectionLabel(text: "Vehicle")
                         Text(health.headline)
-                            .dlFont(.metric)
+                            .dlFont(.metric, weight: .semibold)
                             .foregroundStyle(DLColor.primaryText)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(DLColor.unknown)
+                            .contentTransition(.interpolate)
+                        if let explanation = healthExplanation(health) {
+                            Text(explanation)
+                                .font(DL.Font.caption)
+                                .foregroundStyle(DLColor.secondaryText)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    if let explanation = healthExplanation(health) {
-                        Text(explanation)
-                            .font(DL.Font.callout)
-                            .foregroundStyle(DLColor.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(DLColor.unknown)
+                        .accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .dlCard()
+                .dlCard(tint: DLColor.status(health.overall))
             }
-            .buttonStyle(.plain)
+            .dlPressable()
         }
     }
 
@@ -148,6 +181,16 @@ struct TodayView: View {
             : [GridItem(.flexible()), GridItem(.flexible())]
     }
 
+    /// The fuel gauge's colour follows the level: accent while comfortable, amber
+    /// under a quarter, red under a tenth. Thresholds, not a smooth ramp, so the colour
+    /// change is an event a driver notices rather than a drift nobody does.
+    private var fuelTint: Color {
+        guard let level = drive.fuelStatus.levelPercent.value else { return DLColor.unknown }
+        if level < 10 { return DLColor.critical }
+        if level < 25 { return DLColor.watch }
+        return DLColor.accent
+    }
+
     private var quickFacts: some View {
         LazyVGrid(columns: quickFactColumns, spacing: DL.Spacing.medium) {
             MetricView(label: "Range",
@@ -157,12 +200,19 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .dlCard()
 
-            MetricView(label: "Fuel",
-                       value: formatter.percent(drive.fuelStatus.levelPercent.value),
-                       unit: "%",
-                       provenance: drive.fuelStatus.levelPercent.provenance)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .dlCard()
+            VStack(alignment: .leading, spacing: DL.Spacing.small) {
+                MetricView(label: "Fuel",
+                           value: formatter.percent(drive.fuelStatus.levelPercent.value),
+                           unit: "%",
+                           provenance: drive.fuelStatus.levelPercent.provenance)
+                // A gauge under the number, filled from the same value, coloured by
+                // how low it is. An empty track when the car does not report fuel -
+                // never a bar at zero pretending to be an empty tank.
+                FillBar(fraction: drive.fuelStatus.levelPercent.value.map { $0 / 100 },
+                        tint: fuelTint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .dlCard()
 
             lastDriveTile
             weatherTile
@@ -269,9 +319,9 @@ struct TodayView: View {
                         StatusIndicator(status: next.status, showsLabel: false, size: 17)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .dlCard()
+                    .dlCard(tint: next.status > .normal ? DLColor.status(next.status) : nil)
                 }
-                .buttonStyle(.plain)
+                .dlPressable()
             }
         }
     }

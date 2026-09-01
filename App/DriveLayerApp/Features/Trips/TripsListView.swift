@@ -101,8 +101,26 @@ private struct TripRow: View {
     let trip: Trip
     let formatter: DisplayFormatter
 
+    /// The worst thing that happened on the drive, if anything did, so a row with a
+    /// hard braking event or an adapter drop is distinguishable at a glance from a
+    /// clean one. Normal events do not count: the glyph stays in the accent for those.
+    private var worstEvent: SemanticStatus? {
+        trip.events.map(\.severity).filter { $0 > .normal }.max()
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: DL.Spacing.medium) {
+            // The drive's shape. Every trip carried a polyline that was drawn nowhere;
+            // at 44pt it is what makes a list of dates into a list of drives.
+            RouteGlyph(points: trip.routePolyline,
+                       tint: worstEvent.map(DLColor.status) ?? DLColor.accent)
+                .frame(width: 44, height: 44)
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: DL.Radius.small, style: .continuous)
+                        .fill((worstEvent.map(DLColor.status) ?? DLColor.accent).opacity(0.10))
+                )
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(formatter.mediumDate(trip.startedAt) ?? "")
                     .font(DL.Font.body.weight(.medium))

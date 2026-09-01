@@ -21,6 +21,8 @@ extension DeepLink {
         case .lastTrip: return Route(tab: .trips, path: [.lastTrip])
         case .vehicle: return Route(tab: .vehicle, path: [])
         case .insights: return Route(tab: .today, path: [.insights])
+        // A tab root, like the others above: switching tab is the whole journey.
+        case .hyperion: return Route(tab: .hyperion, path: [])
         case .fuel: return Route(tab: .vehicle, path: [.fuel])
         case .maintenance: return Route(tab: .vehicle, path: [.maintenance])
         case .documents: return Route(tab: .vehicle, path: [.documents])
@@ -43,6 +45,7 @@ struct DeepLinkDestination: View {
         switch link {
         case .lastTrip: LatestTripView()
         case .insights: InsightsView()
+        case .hyperion: HyperionView()
         case .fuel: FuelView()
         case .maintenance: MaintenanceView()
         case .documents: DocumentsView()

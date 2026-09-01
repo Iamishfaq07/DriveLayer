@@ -24,16 +24,19 @@ struct DriveView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DL.Spacing.large) {
-                    speedBlock
-                    tripRow
-                    destinationSection
-                    contextSection
-                    controls
+                    speedBlock.dlArrive(index: 0)
+                    tripRow.dlArrive(index: 1)
+                    destinationSection.dlArrive(index: 2)
+                    contextSection.dlArrive(index: 3)
+                    controls.dlArrive(index: 4)
                 }
                 .dlScreenPadding()
                 .padding(.vertical, DL.Spacing.medium)
             }
-            .background(DLColor.background)
+            // The top edge takes the Hyperion status while driving, so a car whose
+            // engine has moved to Watch is warmer at the top of the screen than one
+            // that is fine - a cue that arrives before the driver reads anything.
+            .background(PanelBackground(statusTint: drive.hyperion.isSilent ? nil : DLColor.status(drive.hyperion.overall)))
             .navigationTitle("Drive")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -49,7 +52,7 @@ struct DriveView: View {
                     Button {
                         isShowingCopilot = true
                     } label: {
-                        Label("Ask copilot", systemImage: "bubble.left.and.text.bubble.right")
+                        Label("Ask Harrier", systemImage: "bubble.left.and.text.bubble.right")
                     }
                 }
             }
@@ -62,23 +65,45 @@ struct DriveView: View {
 
     private var speedBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel(text: drive.isRecording ? "Recording" : "Speed")
+            HStack(spacing: DL.Spacing.tight) {
+                // The recording state is the one thing worth animating here: a breathing
+                // red dot in the periphery says "this drive is being kept" without a
+                // word having to be read at speed.
+                if drive.isRecording {
+                    LiveDot(isLive: true, tint: DLColor.critical)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                SectionLabel(text: drive.isRecording ? "Recording" : "Speed")
+                    .contentTransition(.interpolate)
+            }
+            .animation(DL.Motion.arrive, value: drive.isRecording)
+
             HStack(alignment: .firstTextBaseline, spacing: DL.Spacing.tight) {
-                Text(formatter.speed(kmh: speedKmh) ?? "—")
-                    .dlFont(.hero, usesMonospacedDigits: true)
-                    .contentTransition(.numericText())
-                    .foregroundStyle(speedKmh == nil ? DLColor.unknown : DLColor.primaryText)
+                RollingNumber(value: formatter.speed(kmh: speedKmh), font: .hero, weight: .semibold)
                 Text(formatter.speedUnitLabel)
                     .font(DL.Font.title)
                     .foregroundStyle(DLColor.secondaryText)
             }
-            .animation(DL.Motion.value, value: speedKmh)
             if speedKmh == nil {
                 Text("Waiting for GPS or vehicle speed")
                     .font(DL.Font.caption)
                     .foregroundStyle(DLColor.secondaryText)
+            } else {
+                speedSourceLine
             }
         }
+    }
+
+    /// Which sensor the big number is coming from. OBD speed and GPS speed disagree by
+    /// a few km/h routinely, and a driver who sees the number change character when the
+    /// adapter drops deserves to know why.
+    private var speedSourceLine: some View {
+        let fromOBD = environment.obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: Date()) != nil
+        return Text(fromOBD ? "From the vehicle" : "From GPS")
+            .font(DL.Font.caption)
+            .foregroundStyle(DLColor.secondaryText)
+            .contentTransition(.interpolate)
+            .animation(DL.Motion.standard, value: fromOBD)
     }
 
     private var tripRow: some View {
@@ -219,23 +244,24 @@ struct DriveView: View {
 
     private var controls: some View {
         VStack(spacing: DL.Spacing.small) {
+            // One 56pt target either way, the same size in both states so the driver's
+            // thumb lands in the same place whether starting or stopping.
             if drive.isRecording {
                 Button(role: .destructive) {
                     drive.endDriveManually()
                 } label: {
-                    Label("End drive", systemImage: "stop.circle")
-                        .frame(maxWidth: .infinity)
+                    Label("End drive", systemImage: "stop.fill")
                 }
-                .buttonStyle(.bordered)
+                .dlPrimaryButton(role: .destructive)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else {
                 Button {
                     drive.startDriveManually()
                 } label: {
-                    Label("Start drive", systemImage: "play.circle")
-                        .frame(maxWidth: .infinity)
+                    Label("Start drive", systemImage: "play.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(DLColor.accent)
+                .dlPrimaryButton()
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
 
             if !environment.settings.automaticTripDetection {
@@ -245,6 +271,7 @@ struct DriveView: View {
                     .multilineTextAlignment(.center)
             }
         }
+        .animation(DL.Motion.arrive, value: drive.isRecording)
     }
 }
 
@@ -308,7 +335,8 @@ struct TelemetryDetailView: View {
             guard let value = telemetry.value(metric) else { return nil }
             let formatted: String?
             switch metric {
-            case .coolantTemperatureC, .intakeAirTemperatureC, .ambientAirTemperatureC:
+            case .coolantTemperatureC, .intakeAirTemperatureC, .ambientAirTemperatureC,
+                 .oilTemperatureC, .catalystTemperatureC:
                 formatted = formatter.temperature(celsius: value)
             case .vehicleSpeedKmh:
                 formatted = formatter.speed(kmh: value)
@@ -316,6 +344,23 @@ struct TelemetryDetailView: View {
                 formatted = formatter.voltage(value)
             case .engineRPM:
                 formatted = formatter.rpm(value)
+            // Fuel trims are signed and small; a trim of -2.3% rounded to "-2" and shown
+            // as a percentage lost the sign's meaning and the decimal that matters.
+            case .shortTermFuelTrimPercent, .longTermFuelTrimPercent:
+                formatted = String(format: "%+.1f", value)
+            case .commandedEquivalenceRatio:
+                formatted = String(format: "%.3f", value)
+            case .massAirFlowGramsPerSecond, .fuelRateLitresPerHour:
+                formatted = String(format: "%.1f", value)
+            case .timingAdvanceDegrees:
+                formatted = String(format: "%.1f", value)
+            // Pressures and the raw bitfields were falling through to `percent`, which
+            // showed manifold pressure as "101" with a % unit and a monitor-status byte as
+            // a meaningless integer. Bitfields are decoded elsewhere; they are not values.
+            case .fuelSystemStatusCode, .monitorStatusCode:
+                return nil
+            case .intakeManifoldPressureKPa, .barometricPressureKPa, .fuelRailPressureKPa:
+                formatted = String(format: "%.0f", value)
             default:
                 formatted = formatter.percent(value)
             }

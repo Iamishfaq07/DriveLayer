@@ -706,7 +706,9 @@ final class DriveSessionCoordinator {
                                      fuelStatus: fuelStatus,
                                      dieselAssessment: dieselAssessment,
                                      isDriving: isRecording)
-        return CopilotContextBuilder.build(from: context, health: health, insights: insights)
+        // The same assessment the Hyperion screen and CarPlay read, so Ask Harrier
+        // cannot describe an engine the screen does not show.
+        return CopilotContextBuilder.build(from: context, health: health, insights: insights, hyperion: hyperion)
     }
 
     // MARK: - Weather

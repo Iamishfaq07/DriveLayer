@@ -182,7 +182,10 @@ struct InsightCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .dlCard()
+        // Tinted by severity when it is anything above normal, so a column of insights
+        // can be scanned for the amber one without reading a word of it. A normal
+        // insight stays on the plain surface: colour is spent on what needs it.
+        .dlCard(tint: insight.severity > .normal ? DLColor.status(insight.severity) : nil)
         // A card is one thought. Combining keeps the title, the summary and the
         // reasoning in one utterance instead of four separate swipes.
         .accessibilityElement(children: .combine)

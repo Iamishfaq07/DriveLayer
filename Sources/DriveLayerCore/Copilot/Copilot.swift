@@ -79,12 +79,22 @@ struct LocalCopilot: CopilotProviding, Sendable {
         case regenerationHistory
         case troubleCodeMeaning
         case monthComparison
+        // The Hyperion intents. Each answers from the same assessment the Hyperion
+        // screen shows, so the copilot cannot say something the screen does not.
+        case turboStatus
+        case fuelSystemStatus
+        case warmUpStatus
+        case activeFaults
 
         /// Keywords, all of which contribute to a match score.
         var keywords: [String] {
             switch self {
             case .vehicleHealth: return ["how is the car", "how's the car", "car doing", "vehicle health", "everything ok", "how is my car"]
             case .engineStatus: return ["engine", "coolant", "temperature", "running hot", "overheat"]
+            case .turboStatus: return ["turbo", "boost", "intake", "air system", "manifold", "heat soak"]
+            case .fuelSystemStatus: return ["fuel system", "fuel trim", "trims", "closed loop", "open loop", "mixture", "injector"]
+            case .warmUpStatus: return ["warmed up", "warm up", "warm-up", "cold engine", "operating temperature", "is it warm"]
+            case .activeFaults: return ["any faults", "faults", "any codes", "warning light", "check engine", "anything wrong"]
             case .batteryStatus: return ["battery", "voltage", "charging", "weak"]
             case .fuelAndRange: return ["fuel", "range", "how far", "tank", "petrol", "diesel left", "empty"]
             case .economyToday: return ["mileage", "economy", "consumption", "kmpl", "km per litre", "efficiency"]
@@ -94,20 +104,23 @@ struct LocalCopilot: CopilotProviding, Sendable {
             case .lastService: return ["service", "serviced", "maintenance", "due"]
             case .regenerationHistory: return ["regeneration", "regen", "dpf", "particulate", "soot"]
             case .troubleCodeMeaning: return ["what does", "code mean", "dtc", "fault code", "error code"]
-            case .monthComparison: return ["compared", "last month", "changed", "versus", "vs last"]
+            // "compare with usual" is how the example question puts it; the test that
+            // every example routes to an intent is what found this missing.
+            case .monthComparison: return ["compared", "compare", "last month", "changed", "versus", "vs last", "with usual", "than usual"]
             }
         }
     }
 
     static let exampleQuestions = [
-        "How is my engine doing?",
-        "Is my battery getting weak?",
-        "How much fuel did this trip use?",
-        "Why was mileage worse today?",
-        "How many short drives did I do this week?",
-        "What's the weather ahead?",
-        "When was my last service?",
-        "What does P2002 mean?"
+        "How's the car?",
+        "How's the engine?",
+        "Is the engine warmed up?",
+        "How's the turbo?",
+        "How is the fuel system?",
+        "Any faults?",
+        "What's ahead?",
+        "Why was mileage lower today?",
+        "How does today compare with usual?"
     ]
 
     func answer(question: String, snapshot: VehicleContextSnapshot) async throws -> CopilotAnswer {
@@ -139,6 +152,13 @@ struct LocalCopilot: CopilotProviding, Sendable {
         case .lastService: return service(snapshot)
         case .regenerationHistory: return regeneration(snapshot)
         case .monthComparison: return monthComparison(snapshot)
+        case .turboStatus: return hyperionArea("Air & turbo", snapshot,
+                                               unavailable: "Turbo and intake behaviour need intake and ambient air temperature from the adapter, and I'm not seeing both.")
+        case .fuelSystemStatus: return hyperionArea("Fuel system", snapshot,
+                                                    unavailable: "The fuel system state needs a connected adapter that reports it, and I'm not seeing one.")
+        case .warmUpStatus: return hyperionArea("Engine state", snapshot,
+                                                unavailable: "Whether the engine is warmed up needs coolant temperature from the adapter, and I'm not seeing it.")
+        case .activeFaults: return activeFaults(snapshot)
         case .troubleCodeMeaning:
             return compose(statements: [CopilotStatement(
                 text: "Tell me the code — something like P0401 — and I'll explain what it means.",
@@ -216,6 +236,29 @@ struct LocalCopilot: CopilotProviding, Sendable {
     }
 
     private static func engineStatus(_ snapshot: VehicleContextSnapshot) -> CopilotAnswer {
+        // The Hyperion assessment is the richer answer: it knows the warm-up phase, the
+        // intake picture and the comparison to this car's baseline. Fall back to the
+        // health system's one-word status only when there is no assessment at all.
+        if let hyperion = snapshot.hyperion, !hyperion.isSilent {
+            var statements: [CopilotStatement] = [
+                CopilotStatement(text: "Overall, the engine reads \(hyperion.overall.lowercased()).", claim: .fact)
+            ]
+            // Every assessed area gets a sentence; unassessed ones are named so the driver
+            // knows the answer is partial rather than assuming it is complete.
+            for area in hyperion.areas where area.notAssessedReason == nil && area.status != "Unknown" {
+                statements.append(CopilotStatement(text: "\(area.name): \(area.headline.lowercased()).",
+                                                   claim: .fact))
+                if let comparison = area.comparison {
+                    statements.append(CopilotStatement(text: comparison, claim: .inference))
+                }
+            }
+            let unassessed = hyperion.areas.filter { $0.notAssessedReason != nil }.map { $0.name.lowercased() }
+            let limitation = unassessed.isEmpty
+                ? nil
+                : "Not assessed yet: " + unassessed.joined(separator: ", ") + ". Those need readings the car isn't providing."
+            return compose(statements: statements, limitation: limitation)
+        }
+
         guard let engineStatus = snapshot.health?.systems["Engine"] else {
             return compose(statements: [CopilotStatement(
                 text: "I can't see engine data at the moment. That needs a connected OBD-II adapter.",
@@ -224,6 +267,60 @@ struct LocalCopilot: CopilotProviding, Sendable {
         var statements = [CopilotStatement(text: "Your engine is reading \(engineStatus.lowercased()).", claim: .fact)]
         if let insight = snapshot.recentInsights.first(where: { $0.lowercased().contains("engine") }) {
             statements.append(CopilotStatement(text: insight, claim: .inference))
+        }
+        return compose(statements: statements)
+    }
+
+    /// One Hyperion area, by display name, as an answer.
+    ///
+    /// Three outcomes and each is stated as what it is: assessed (the headline, then the
+    /// comparison as an inference), not assessed (the reason, as a fact about what the car
+    /// is reporting), or no assessment at all (the caller's `unavailable` line).
+    private static func hyperionArea(_ name: String,
+                                     _ snapshot: VehicleContextSnapshot,
+                                     unavailable: String) -> CopilotAnswer {
+        guard let hyperion = snapshot.hyperion, let area = hyperion.area(named: name) else {
+            return compose(statements: [CopilotStatement(text: unavailable, claim: .fact)])
+        }
+        if let reason = area.notAssessedReason {
+            return compose(statements: [CopilotStatement(text: "I can't assess \(name.lowercased()) yet. \(reason)",
+                                                         claim: .fact)])
+        }
+        var statements = [CopilotStatement(text: "\(name): \(area.headline.lowercased()).", claim: .fact)]
+        if let comparison = area.comparison {
+            statements.append(CopilotStatement(text: comparison, claim: .inference))
+        }
+        // The confidence travels with the answer, so "normal" on two drives is not read
+        // as the same statement as "normal" on forty.
+        return compose(statements: statements,
+                       limitation: area.confidence == "High confidence" ? nil : "\(area.confidence): this firms up with more comparable drives.")
+    }
+
+    /// Faults, in the order a driver cares about: the lamp, then stored codes, then the
+    /// diagnostics area's own verdict on the self-tests.
+    private static func activeFaults(_ snapshot: VehicleContextSnapshot) -> CopilotAnswer {
+        var statements: [CopilotStatement] = []
+        if !snapshot.activeTroubleCodes.isEmpty {
+            let codes = snapshot.activeTroubleCodes.joined(separator: ", ")
+            statements.append(CopilotStatement(
+                text: "The car is reporting \(snapshot.activeTroubleCodes.count == 1 ? "one stored code" : "\(snapshot.activeTroubleCodes.count) stored codes"): \(codes). Ask me about any of them by number.",
+                claim: .fact))
+        }
+        if let diagnostics = snapshot.hyperion?.area(named: "Diagnostics") {
+            if let reason = diagnostics.notAssessedReason {
+                statements.append(CopilotStatement(text: reason, claim: .fact))
+            } else {
+                statements.append(CopilotStatement(text: diagnostics.headline + ".", claim: .fact))
+            }
+        }
+        if statements.isEmpty {
+            // Nothing above could speak: no codes, and no diagnostics area in the
+            // assessment. Say exactly that. Claiming "the warning light is off" here would
+            // be an invention - the lamp state lives in the diagnostics area, and if that
+            // area is absent, nobody has read the lamp.
+            statements.append(CopilotStatement(
+                text: "No stored fault codes have been read, and I haven't been able to check the warning light. Both need a connected adapter.",
+                claim: .fact))
         }
         return compose(statements: statements)
     }
