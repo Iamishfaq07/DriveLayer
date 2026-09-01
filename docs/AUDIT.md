@@ -419,6 +419,13 @@ CI jobs on push. A green `swiftcheck` is still not a green build.
 
 Nine confirmed, one not applicable, one already fixed.
 
+> **Superseded in part by the third audit below.** P0-1 was classified NOT APPLICABLE
+> here on the grounds that no shipped platform lacks `os`. That reasoning was sound for
+> the *app* and wrong for the *package*, which is what `swift test` builds — see
+> "H-1 · logging" in the third audit. P0-8 was confirmed and fixed here, but only the
+> half that was looked at: the gate's yield logic. That the gate had no callers at all
+> was not noticed. See "H-2 · sensor gate".
+
 ## P0-1 — Logging abstraction · NOT APPLICABLE
 
 The brief said to treat the repository as broken and not to proceed. It is not broken:
@@ -673,3 +680,124 @@ Existing scenarios: `normalHighway`, `coldStart`, `hotCityTraffic`, `mountainCli
 `fuelRunningLow`, `dpfWarning`, `sensorUnavailable`, `linkDropAndRecover`,
 `invalidResponses`. Note that `dpfWarning` is diesel product logic and is in scope for
 removal under P1.
+
+---
+
+# Hyperion Alpha audit — third pass
+
+Carried out at `6e563c7`, re-verifying the brief against current source before changing
+anything. Same environment, and it still has not improved: Windows, no Swift toolchain,
+no Xcode, no iOS SDK. CI remains the only compiler this project has.
+
+Two of the findings below were classified in the second audit and are being revised, not
+re-reported. Both revisions have the same shape: **a type existing and being tested was
+mistaken for the product using it.**
+
+## Summary
+
+| # | Item | Classification |
+|---|---|---|
+| H-1 | Logging blocks cross-platform `swift test` | **CONFIRMED** — revises P0-1 · fixed |
+| H-2 | SensorGate is not in the production path | **CONFIRMED** — extends P0-8 · fixed |
+| H-3 | Reconnect can bind to another car's adapter | **CONFIRMED** · fixed |
+| H-4 | An adapter is remembered before it validates | **CONFIRMED** · fixed |
+| H-5 | Sensor quality/freshness model | **PARTIAL** · quality added, units not |
+
+## H-1 · logging — CONFIRMED, revising P0-1's NOT APPLICABLE
+
+The previous classification reasoned that `Package.swift` targets only iOS and macOS,
+both of which ship `os`, so an `os`-only API was a portability gap rather than a defect.
+
+The premise is right and the conclusion does not follow. `swift test` builds the
+*package*, not the app, and `DriveLayerCore` is Foundation-only by design precisely so it
+can be built and tested without an SDK — that is the stated reason the core exists as a
+separate module. `TelemetryJournal` is core product logic, and it called
+`PrivacyLog.logger(.persistence).error(...)` at four sites while `logger(_:)` was declared
+inside `#if canImport(os)`.
+
+So on any platform without `os` the core did not compile, and the cross-platform build
+the package advertises was broken. CI could not show it: every job that compiles the core
+runs on macOS.
+
+Verified by the compiler, not by inspection. The fix moved the call sites to a
+level-based API that exists unconditionally, and the CI build then failed on
+`App/Shared/WidgetSnapshot.swift:102` — a tenth call site my own `findstr` search had
+missed, because `App\*.swift` does not recurse into subdirectories. Nine more were found
+the same way once the search was rewritten to walk the tree.
+
+Worth recording as a method note: the search tool was wrong, and the compiler was the
+thing that said so.
+
+## H-2 · sensor gate — CONFIRMED, extending P0-8
+
+P0-8 found that `SensorGate.offer` yielded after three rejections without consulting the
+reason, and fixed it. That fix is present and correct at `SensorSanity.swift:218`.
+
+What was not asked is whether anything called `SensorGate`. Nothing did:
+
+```
+Sources/.../Hyperion/HyperionGuardian.swift:94   (a comment)
+Sources/.../Hyperion/SensorSanity.swift:167      (the declaration)
+Sources/.../Hyperion/SensorSanity.swift:187      (its own ==)
+```
+
+`HyperionGuardian:94` even observes that `HeatSoakAnalyser` and `SensorGate` "existed,
+were tested, and were reachable from no production code" — the guardian was wired up, the
+gate was not.
+
+The live path ran one check: `OBDReading.isPlausible`, a stateless range test computed at
+decode time, which `VehicleTelemetry.apply` used to drop a reading. Traced concretely at
+`OBDConnectionManager.swift:223`, the only call site. So the range half of the promise
+held and nothing else did — a value inside the band could jump 80 °C in one second, sit
+byte-identical for minutes after the ECU stopped answering, or be the value a sensor
+sends when it has nothing, and each was stored as `measured` and passed to the baselines,
+the trip, the insight rules and the screen.
+
+This is why the P0-8 fix did not help in practice: it corrected the yield logic of a
+component the product never invoked. The gate now lives inside `VehicleTelemetry.apply`,
+the single point where a reading is admitted, so it cannot be bypassed by a later caller.
+
+Tests for it start at raw OBD bytes and run through the real catalog decoder, because
+tests written against `SensorGate` directly would have passed before this change too.
+
+## H-3 · adapter selection — CONFIRMED
+
+`BluetoothOBDTransport.didDiscover` checked only whether a peripheral's name looked like
+an adapter. It never compared the identifier against the saved target.
+
+Unreachable while iOS has the peripheral cached, because `retrievePeripherals` returns it
+and the scan never starts. Reachable exactly when the adapter is powered down, out of
+range, or uncached after a reboot: `beginConnectionIfPowered` falls through to a scan, and
+the first peripheral advertising an OBD-ish name wins.
+
+In a driveway that is invisible. In a car park it is another car, and DriveLayer would
+attribute a stranger's engine to the driver's Harrier — including into the learned
+baselines, which is the one thing P0-10 was written to prevent for simulated data.
+
+## H-4 · adapter persistence — CONFIRMED
+
+`connect(toAdapter:name:)` wrote `settings.lastAdapterIdentifier` and `lastAdapterName`
+as its first act, before attempting the connection. Those two values are what
+`connectIfPossible()` reconnects to on every launch.
+
+So anything tapped on the pairing screen became "the driver's adapter" permanently,
+regardless of outcome — headphones whose name passed the heuristic, or an adapter that
+connected over BLE but never completed its ELM handshake. Nothing cleared it.
+
+`rememberConnectedAdapter()` already guarded on `isConnected`, so the durable store was
+right while the settings pair driving auto-reconnect was not. Two mechanisms recording
+the same fact, disagreeing.
+
+## H-5 · sensor quality model — PARTIAL
+
+P0-8 noted the metadata gap: a gated value had value, provenance, timestamp and free-text
+`basis`, but no structured way to mark a reading suspect.
+
+`SensorQuality` now covers `good`/`suspect`/`stale`/`invalid`/`unavailable`, and
+`VehicleTelemetry.Entry` carries it with the rejection reason. A refused reading holds the
+last good value as `suspect` with its reason, or stays absent — never zero.
+
+**Not done:** units are still implicit in metric names (`coolantTemperatureC`,
+`vehicleSpeedKmh`) rather than carried as data. That is a wider change than this pass, and
+the naming convention makes the current state safe rather than merely lucky. Recorded so
+it is visible instead of assumed complete.

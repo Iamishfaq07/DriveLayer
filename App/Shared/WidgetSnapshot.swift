@@ -99,7 +99,7 @@ enum WidgetSnapshotStore {
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(snapshot).write(to: fileURL, options: [.atomic])
         } catch {
-            PrivacyLog.logger(.app).error("Could not update the widget snapshot")
+            PrivacyLog.error(.app, "Could not update the widget snapshot")
         }
     }
 

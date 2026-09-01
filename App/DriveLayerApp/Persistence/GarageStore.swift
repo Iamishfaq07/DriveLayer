@@ -29,7 +29,7 @@ final class GarageStore {
             try context.save()
         } catch {
             lastError = "\(description) failed: \(error.localizedDescription)"
-            PrivacyLog.logger(.persistence).error("\(description, privacy: .public) failed")
+            PrivacyLog.error(.persistence, "\(description) failed")
         }
     }
 
@@ -56,7 +56,7 @@ final class GarageStore {
         if failures > 0 {
             undecodablePayloads += failures
             lastError = "\(description): \(failures) saved item(s) could not be read and were kept for a later version."
-            PrivacyLog.logger(.persistence).error("\(description, privacy: .public): \(failures, privacy: .public) undecodable payloads")
+            PrivacyLog.error(.persistence, "\(description): \(failures) undecodable payloads")
         }
         return values
     }

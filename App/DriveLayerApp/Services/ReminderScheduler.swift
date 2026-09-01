@@ -86,7 +86,7 @@ final class ReminderScheduler {
                 scheduled += 1
             } catch {
                 lastError = error.localizedDescription
-                PrivacyLog.logger(.app).error("Could not schedule a reminder")
+                PrivacyLog.error(.app, "Could not schedule a reminder")
             }
         }
         scheduledCount = scheduled

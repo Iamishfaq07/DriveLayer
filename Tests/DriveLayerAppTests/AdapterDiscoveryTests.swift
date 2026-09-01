@@ -57,4 +57,69 @@ final class AdapterDiscoveryTests: XCTestCase {
         XCTAssertTrue(scanner.allDiscoveries.isEmpty)
         XCTAssertFalse(scanner.showsEverything, "the unfiltered list is opt-in, for a debug screen")
     }
+
+    // MARK: - Which adapter a connection is allowed to bind to
+
+    /// Recognising an adapter and being allowed to connect to it are separate questions, and
+    /// the transport used to ask only the first. `didDiscover` checked `looksLikeAdapter` and
+    /// nothing else, so once the scan fallback ran - which it does whenever
+    /// `retrievePeripherals` returns nothing, as it does for an adapter that is powered down,
+    /// out of range, or simply not cached after a reboot - a saved target was ignored and the
+    /// first OBD-ish name in range was taken instead.
+    ///
+    /// In a driveway that is invisible. In a car park it means connecting to another car.
+
+    private func shouldBind(_ identifier: UUID,
+                            name: String?,
+                            policy: BluetoothOBDTransport.SelectionPolicy) -> Bool {
+        BluetoothOBDTransport.shouldBind(to: identifier,
+                                         name: nil,
+                                         advertisement: advertisement(name),
+                                         policy: policy)
+    }
+
+    func testASavedTargetBindsOnlyToThatExactPeripheral() {
+        let mine = UUID()
+        XCTAssertTrue(shouldBind(mine, name: "OBDII", policy: .onlyTarget(mine)))
+    }
+
+    /// The heart of the fix: another adapter, advertising a perfectly plausible name, in a
+    /// car that is not the driver's.
+    func testAnotherPersonsAdapterIsIgnoredWhenATargetIsSaved() {
+        let mine = UUID()
+        let theirs = UUID()
+        XCTAssertNotEqual(mine, theirs)
+
+        for name in ["OBDII", "ELM327-BLE", "VGATE iCar Pro", "OBDLink CX"] {
+            XCTAssertFalse(shouldBind(theirs, name: name, policy: .onlyTarget(mine)),
+                           "\(name) is a plausible adapter, but it is not the saved one")
+        }
+    }
+
+    /// Identity is the whole test under `onlyTarget`. A previously validated adapter that
+    /// advertises an unhelpful name today is still the right device, and refusing it would
+    /// strand the driver for no benefit.
+    func testTheSavedTargetIsAcceptedEvenIfItsNameLooksNothingLikeAnAdapter() {
+        let mine = UUID()
+        XCTAssertTrue(shouldBind(mine, name: "BLE-3A7F", policy: .onlyTarget(mine)))
+        XCTAssertTrue(shouldBind(mine, name: nil, policy: .onlyTarget(mine)))
+    }
+
+    /// Opportunistic binding is still available, and only where it is the point: the driver
+    /// is on the pairing screen looking for an adapter they have not saved yet.
+    func testPairingModeStillTakesTheFirstPlausibleAdapter() {
+        XCTAssertTrue(shouldBind(UUID(), name: "OBDII", policy: .firstPlausibleAdapter))
+        XCTAssertFalse(shouldBind(UUID(), name: "AirPods Pro", policy: .firstPlausibleAdapter))
+    }
+
+    /// The policy comes from whether an identifier was supplied, so a caller cannot ask for
+    /// a target and get opportunistic scanning by accident. This is the invariant that keeps
+    /// the reconnect path safe.
+    func testTheTransportPicksItsPolicyFromWhetherATargetWasGiven() {
+        let saved = UUID()
+        XCTAssertEqual(BluetoothOBDTransport(peripheralID: saved, displayName: "Mine").selectionPolicyForTesting,
+                       .onlyTarget(saved))
+        XCTAssertEqual(BluetoothOBDTransport(peripheralID: nil, displayName: "Any").selectionPolicyForTesting,
+                       .firstPlausibleAdapter)
+    }
 }

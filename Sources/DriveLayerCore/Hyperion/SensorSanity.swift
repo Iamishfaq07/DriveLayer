@@ -98,6 +98,40 @@ enum SensorSanity {
         }
     }
 
+    /// How long a byte-identical value stays believable, per metric.
+    ///
+    /// This is the window `SensorGate` needs to call a reading `.stale`, and getting it
+    /// wrong in either direction is a real error. Too short and a genuinely steady value
+    /// is condemned: ambient temperature on a motorway at night really does not move, and
+    /// a long-term fuel trim not moving is the sensor working. Too long, or absent, and an
+    /// adapter that has stopped talking to the ECU keeps handing back its last frame
+    /// forever while DriveLayer reasons on it as live data.
+    ///
+    /// `nil` means "no staleness limit", for metrics where sitting still is normal and
+    /// indefinite. Freshness is still enforced downstream by
+    /// `VehicleTelemetry.value(_:freshWithin:now:)`, which is about when a value was
+    /// *read*; this is about whether the value is still *changing*.
+    static func staleAfter(for metric: VehicleMetric) -> TimeInterval? {
+        switch metric {
+        case .engineRPM, .vehicleSpeedKmh, .engineLoadPercent, .throttlePositionPercent:
+            // Fast-moving by nature. Identical to the last frame for 30 s while the engine
+            // runs means the adapter is repeating itself, not that nothing changed.
+            return 30
+        case .coolantTemperatureC, .oilTemperatureC, .intakeAirTemperatureC,
+             .catalystTemperatureC, .controlModuleVoltageV:
+            // Thermal and electrical values drift constantly, but slowly. Several minutes
+            // of a bit-identical reading is an adapter fault, not a stable engine.
+            return 300
+        case .fuelLevelPercent, .ambientAirTemperatureC, .barometricPressureKPa,
+             .ethanolPercent, .longTermFuelTrimPercent:
+            // Genuinely capable of sitting still for a long time. No limit rather than a
+            // generous one: a full tank on a short drive is not a fault to report.
+            return nil
+        default:
+            return nil
+        }
+    }
+
     /// Values that mean "no reading" rather than a reading.
     ///
     /// Deliberately short. Rejecting a genuine zero — an idling engine really does report

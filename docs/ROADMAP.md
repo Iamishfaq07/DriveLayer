@@ -2,11 +2,17 @@
 
 Maintained as work proceeds.
 
-**CI is green at `a597477`.** All four jobs pass: static checks, `swift build` +
-`swift test` (486 tests across 52 suites) on macOS, the app test target (40 tests
+**CI is green at `982cd52`.** All four jobs pass: static checks, `swift build` +
+`swift test` (494 tests across 53 suites) on macOS, the app test target (40 tests
 across 6 suites), and an Xcode build of the app and widget extension for the iOS
 Simulator. What remains unverified needs hardware — see "Known gaps" at the end of
 this file.
+
+One number in that list is worth reading sceptically, and this is the second time this
+paragraph has had to say so. `swift test` was green at `a597477` on a package that could
+not build on a platform without `os`: `TelemetryJournal` called an `os`-only API, and
+every job that compiles the core runs on macOS. The suite passing proves the code
+compiles *for the runner it ran on*. See "H-1" in [AUDIT.md](AUDIT.md).
 
 Counts are taken from the sources, because `swift test --parallel` prints no total on
 the way past. A green claim here is only ever as fresh as the commit named beside it:
@@ -179,7 +185,7 @@ Honest list of what is scaffolding rather than working software.
 | Area | State |
 |---|---|
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
-| **Test execution** | 526 tests passing in CI at `a597477`: 486 via `swift test`, 40 in the app target. |
+| **Test execution** | 534 tests passing in CI at `982cd52`: 494 via `swift test`, 40 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
 | **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
@@ -190,7 +196,7 @@ Honest list of what is scaffolding rather than working software.
 | **Widget deep links** | Every widget and the Live Activity open the screen they describe, the last-drive widget included — it links to "my last drive" rather than an identifier, so the app resolves which drive that is as it opens. |
 | **Accessibility on device** | Contrast is enforced by tests and every metric has a spoken label, but nothing has been driven with VoiceOver or at the largest text sizes on real hardware. |
 | **Other vehicles** | Deliberately not offered. The catalog, the profile system and per-vehicle isolation are all built and tested; `SupportedVehicles.offeredProfileIDs` lists the one car a driver may pick, because it is the only one anything has been checked against. |
-| **Driver-reported hazards** | Unreachable. `RoadConditionProviding` and `LocalRoadReportStore` in `RoadIntelligence/RoadReports.swift` are referenced from nowhere — not the app, not the widgets, not even a test. Either wire them or delete them; leaving them reads as a feature that exists. |
+| **Driver-reported hazards** | Unreachable, and re-confirmed at `982cd52`: `RoadConditionProviding` and `LocalRoadReportStore` in `RoadIntelligence/RoadReports.swift` are referenced from nowhere — not the app, not the widgets, not even a test. Deliberately left alone this pass rather than wired: hazard reporting is a V2 feature and needs UI, whereas the same pattern in `SensorGate` was a reliability defect because unreachable code there *claimed* to be protecting live data. This scaffolding claims nothing. Still either wire it or delete it. |
 | **Watch app** | Not started. |
 
 ## Harrier brief
@@ -274,16 +280,29 @@ Ask Harrier, then the accessibility, battery and long-drive soak work.
 
 ## Next up
 
-1. Wire the Hyperion analysers to something a driver can see. `DriveSessionCoordinator`
-   already calls the sibling `DieselGuardian.assess`, and `InsightEngine.standardRules`
-   is how every other per-metric assessment reaches the driver — those are the two
-   established seams, and neither is used yet.
-2. Decode monitor-status PID 0x01 structurally (MIL state, DTC count) to finish the
-   event-driven diagnostics refresh.
+The first two items here were "wire the Hyperion analysers to something a driver can
+see" and "decode monitor-status PID 0x01 structurally". Both are done —
+`DriveSessionCoordinator:475` calls `HyperionGuardian.assess`, and `MonitorStatus` is a
+structured type — so they are removed rather than left to look outstanding.
+
+1. **Units as data.** `SensorQuality` now travels with every telemetry entry, but units
+   are still implicit in metric names (`coolantTemperatureC`, `vehicleSpeedKmh`). The
+   convention holds today; it is a convention rather than a guarantee. Recorded as
+   PARTIAL under "H-5" in [AUDIT.md](AUDIT.md) rather than counted as complete.
+2. **`RoadReports.swift`: wire it or delete it.** Still referenced from nowhere. See
+   "Driver-reported hazards" in Known gaps for why it was left alone this pass.
 3. Begin the Hyperion Guardian rename, as one coherent change rather than a
    half-migration.
-4. Run it on a device against a real adapter — still the thing that will find what no
-   amount of CI can.
+4. **Validate the adapter before storing it.** `P0-7c` remains half-done: the pairing
+   screen filters and the classifier is tested, but nothing performs an `ATZ`/`ATI`
+   handshake *before* an adapter is remembered. It is now at least never remembered
+   before the session reports a usable link (see "H-4"), so a non-adapter no longer
+   becomes the permanent reconnect target — but a real handshake is still the check
+   that belongs there.
+5. Run it on a device against a real adapter — still the thing that will find what no
+   amount of CI can. Two items now depend specifically on hardware CI cannot fake: the
+   parking-lot case in "H-3" needs a second adapter present, and the sensor gate's
+   staleness path needs an ECU that genuinely stops answering.
 
 ## V2
 

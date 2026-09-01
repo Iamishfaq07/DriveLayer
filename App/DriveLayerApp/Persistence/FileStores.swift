@@ -23,7 +23,7 @@ private enum ProtectedDirectory {
             }
             return base
         } catch {
-            PrivacyLog.logger(.persistence).error("Could not prepare the \(name, privacy: .public) directory")
+            PrivacyLog.error(.persistence, "Could not prepare the \(name) directory")
             return nil
         }
     }
@@ -170,7 +170,7 @@ final class DocumentFileStore: @unchecked Sendable {
             try data.write(to: url, options: [.atomic, .completeFileProtection])
             return url.lastPathComponent
         } catch {
-            PrivacyLog.logger(.persistence).error("Could not store a document")
+            PrivacyLog.error(.persistence, "Could not store a document")
             return nil
         }
     }

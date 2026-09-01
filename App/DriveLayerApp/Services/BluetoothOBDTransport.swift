@@ -56,10 +56,40 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
         let continuation: CheckedContinuation<String, Error>
     }
 
-    /// - Parameter peripheralID: a previously connected adapter, or `nil` to take the
-    ///   first plausible adapter found while scanning.
+    /// Whether this transport may bind to an adapter it has not been told about.
+    ///
+    /// The distinction exists because "reconnect to the driver's adapter" and "help the
+    /// driver find an adapter" are different jobs, and only one of them may accept an
+    /// unknown device. Conflating them is how DriveLayer could connect to a stranger's
+    /// dongle in a car park: `retrievePeripherals` returns nothing for an adapter that is
+    /// merely powered down or out of range, and the fallback scan then took the first
+    /// peripheral whose name looked OBD-ish - which in a car park is not necessarily the
+    /// one in the driver's own car.
+    enum SelectionPolicy: Equatable {
+        /// Connect only to this exact peripheral. Every other candidate is ignored, however
+        /// plausible its name, and no adapter at all is the correct outcome when the
+        /// driver's own is not present.
+        case onlyTarget(UUID)
+        /// Take the first peripheral that looks like an adapter. Valid only while the
+        /// driver is explicitly pairing, and never on an automatic reconnect.
+        case firstPlausibleAdapter
+    }
+
+    private let selectionPolicy: SelectionPolicy
+
+    /// The policy this transport was constructed with.
+    ///
+    /// Exposed only so a test can assert that supplying an identifier really does produce
+    /// `onlyTarget`. That derivation is the invariant protecting the reconnect path, and it
+    /// happens in `init`, where CoreBluetooth cannot be driven from a test bundle.
+    var selectionPolicyForTesting: SelectionPolicy { selectionPolicy }
+
+    /// - Parameter peripheralID: a previously connected adapter. When non-nil the transport
+    ///   binds to that peripheral alone; pass `nil` only from explicit pairing, where
+    ///   discovering an unknown adapter is the entire purpose.
     init(peripheralID: UUID?, displayName: String) {
         self.targetPeripheralID = peripheralID
+        self.selectionPolicy = peripheralID.map(SelectionPolicy.onlyTarget) ?? .firstPlausibleAdapter
         self.identifier = peripheralID?.uuidString ?? "ble.unknown"
         self.displayName = displayName
         super.init()
@@ -169,6 +199,15 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
             central.connect(known)
             return
         }
+        // Falling through to a scan is right even with a target: `retrievePeripherals`
+        // returns nothing for an adapter iOS has not cached, which happens after a reboot
+        // or a long gap, and the peripheral is then only findable by scanning.
+        //
+        // What must not follow is connecting to whatever turns up. `didDiscover` applies
+        // `selectionPolicy`, so with a target this scan can only ever match that one
+        // identifier - and finding nothing is the correct outcome when the driver's own
+        // adapter is not there. The scan used to be the failure: it took the first
+        // peripheral with an OBD-ish name, which in a car park may be someone else's car.
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
@@ -252,13 +291,37 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
-        guard self.peripheral == nil,
-              Self.looksLikeAdapter(name: peripheral.name, advertisement: advertisementData) else { return }
+        guard self.peripheral == nil else { return }
+        guard Self.shouldBind(to: peripheral.identifier,
+                              name: peripheral.name,
+                              advertisement: advertisementData,
+                              policy: selectionPolicy) else { return }
         central.stopScan()
         self.peripheral = peripheral
         self.targetPeripheralID = peripheral.identifier
         peripheral.delegate = self
         central.connect(peripheral)
+    }
+
+    /// Whether a discovered peripheral is the one this transport is allowed to connect to.
+    ///
+    /// Pure and static so the decision can be tested without CoreBluetooth, which cannot be
+    /// driven from a test bundle. The bug this replaces was one missing comparison: the old
+    /// version checked only that the name looked like an adapter, so a saved target was
+    /// ignored the moment the scan fallback ran.
+    static func shouldBind(to identifier: UUID,
+                           name: String?,
+                           advertisement: [String: Any],
+                           policy: SelectionPolicy) -> Bool {
+        switch policy {
+        case let .onlyTarget(target):
+            // Identity alone. Deliberately not also requiring `looksLikeAdapter`: this
+            // peripheral has been connected to and validated before, and a name that
+            // advertises differently today is not a reason to refuse the right device.
+            return identifier == target
+        case .firstPlausibleAdapter:
+            return looksLikeAdapter(name: name, advertisement: advertisement)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

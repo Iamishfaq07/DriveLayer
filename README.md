@@ -33,10 +33,15 @@ four pass**:
 
 | Job | Runner | What it proves |
 |---|---|---|
-| Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths — plus actionlint and shellcheck over the workflows themselves |
-| Core tests | `macos-14` | `DriveLayerCore` compiles and its **263 tests across 35 suites** pass |
+| Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths |
+| Core tests | `macos-14` | `DriveLayerCore` compiles and its **494 tests across 53 suites** pass |
 | App tests | `macos-15` | The stores, services and coordinator pass against SwiftData, CoreLocation and friends — the layer `swift test` cannot reach |
 | App build | `macos-15` | The app and widget extension compile for the iOS Simulator |
+
+Read the middle row narrowly. It says the core compiles **for the runner it ran on**, and
+that is not the same as the cross-platform build this package advertises: `swift test` was
+green for a long time on a core that could not build without Apple's `os` module, because
+every job that compiles it runs on macOS.
 
 What is still **not** verified, and needs hardware:
 
@@ -75,7 +80,7 @@ The first two came from writing tests; the last two from CI.
 
 ```bash
 # Run the logic tests — no Xcode, no car, no phone required
-swift test          # 263 tests, 35 suites
+swift test          # 494 tests, 53 suites
 
 # Generate the Xcode project and open it
 brew install xcodegen
@@ -149,7 +154,8 @@ Sources/DriveLayerCore/    Foundation-only product logic — no UIKit, SwiftUI,
 App/DriveLayerApp/         The iOS app: design system, services, persistence, screens
 App/DriveLayerWidgets/     WidgetKit extension and the Live Activity
 App/Shared/                Types shared between app and extension
-Tests/DriveLayerCoreTests/ 263 tests, weighted towards failure cases
+Tests/DriveLayerCoreTests/ 494 tests, weighted towards failure cases
+Tests/DriveLayerAppTests/  40 tests over the stores, services and coordinator
 Tools/swiftcheck.py        Static consistency checker
 docs/                      Architecture, product, OBD, CarPlay, profiles, privacy, roadmap
 ```
