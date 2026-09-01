@@ -118,6 +118,9 @@ final class OBDConnectionManager {
         transport = nil
         state = .disconnected
         capabilities = nil
+        // A fresh value, so the sensor gates go with it: the previous adapter's last
+        // accepted coolant temperature is not a baseline for judging the next one's rate
+        // of change, and it may not even be the same car.
         telemetry = VehicleTelemetry(updatedAt: .distantPast)
 troubleCodes = []
         monitorStatus = nil
@@ -220,12 +223,22 @@ troubleCodes = []
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
                 // Source.isSimulated existed and was used only for display. This is the
                 // place it actually matters.
-                telemetry.apply(reading, provenance: source?.isSimulated == true ? .simulated : .measured)
+                //
+                // The descriptor's plausible band is handed over rather than left implicit:
+                // the gate inside `apply` needs it to judge this reading against the last
+                // accepted one, and the catalog is the only place those bands are defined.
+                let admission = telemetry.apply(reading,
+                                                provenance: source?.isSimulated == true ? .simulated : .measured,
+                                                plausibleRange: descriptor.plausibleRange)
                 if descriptor.metric == .monitorStatusCode, let code = reading.numericValue {
                     noteMonitorStatus(code)
                 }
-                if !reading.isPlausible {
-                    note("\(reading.name) returned an implausible value and was ignored.")
+                // One report per refusal, whatever the reason. This used to fire only for
+                // `isPlausible`, so the three failures the gate now catches - an impossible
+                // jump, a frame repeating after the ECU went quiet, and the value a sensor
+                // sends when it has none - happened silently.
+                if let explanation = admission.rejectionExplanation {
+                    note("\(reading.name) was ignored: \(explanation).")
                 }
             } catch let error as OBDError {
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
