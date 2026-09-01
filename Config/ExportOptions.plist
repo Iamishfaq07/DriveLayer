@@ -8,11 +8,18 @@
 	<key>method</key>
 	<string>app-store-connect</string>
 
-	<!-- Xcode fetches and renews the profiles for the app and the widget
-	     extension using the App Store Connect API key, so none has to be stored
-	     as a secret or kept in step by hand. -->
+	<!-- Manual, to match the archive. Automatic signing here resolved to a
+	     development identity even for a Release archive, which is the failure
+	     the release workflow spent three runs on. The workflow adds the
+	     matching `provisioningProfiles` dict at export time: the profile names
+	     come out of the profiles themselves, so they cannot be committed. -->
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+
+	<!-- The identity is named here as well as in project.yml, because export
+	     re-signs the payload and does not inherit the archive's settings. -->
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
 
 	<!-- The upload is a separate, explicit step in the workflow, so the export
 	     stops at an .ipa. That keeps a failed upload from being indistinguishable

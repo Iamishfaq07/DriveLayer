@@ -61,7 +61,7 @@ At <https://appstoreconnect.apple.com/apps>, create a new iOS app using bundle I
 "DriveLayer" is taken, anything works — it is only the listing name, and TestFlight
 shows it to you alone.
 
-## 4. Create the six secrets
+## 4. Create the eight secrets
 
 In the repository: **Settings → Secrets and variables → Actions → New repository
 secret**.
@@ -74,11 +74,51 @@ secret**.
 | `APP_STORE_CONNECT_KEY_ID` | App Store Connect → Users and Access → Integrations → App Store Connect API → generate a key with **App Manager** access. The Key ID is shown in the list. |
 | `APP_STORE_CONNECT_ISSUER_ID` | On the same page, above the key list. A UUID. |
 | `APP_STORE_CONNECT_PRIVATE_KEY` | The `.p8` file that key downloads — **once only**. Paste its whole contents, `-----BEGIN PRIVATE KEY-----` line included. |
+| `BUILD_PROVISION_PROFILE_BASE64` | The App Store profile for `com.drivelayer.app`, base64-encoded. See §4b. |
+| `BUILD_PROVISION_PROFILE_WIDGET_BASE64` | The App Store profile for `com.drivelayer.app.widgets`, base64-encoded. See §4b. |
 
 Creating the distribution certificate is the only step that wants a Mac (Keychain
 Access → Certificate Assistant → Request a Certificate from a Certificate
 Authority, then upload the request at
 <https://developer.apple.com/account/resources/certificates/add>).
+
+### 4b. The two provisioning profiles
+
+These are the last two secrets, and the ones the first five TestFlight runs died
+without.
+
+At <https://developer.apple.com/account/resources/profiles/add>, create **two**
+profiles, both of type **App Store Connect** (under Distribution), both using the
+distribution certificate from above:
+
+| Profile for | App ID | Secret |
+|---|---|---|
+| The app | `com.drivelayer.app` | `BUILD_PROVISION_PROFILE_BASE64` |
+| The widget extension | `com.drivelayer.app.widgets` | `BUILD_PROVISION_PROFILE_WIDGET_BASE64` |
+
+Download both, then base64 each one:
+
+```sh
+base64 -w 0 DriveLayer_App_Store.mobileprovision      # Linux
+base64 -i DriveLayer_App_Store.mobileprovision        # macOS
+```
+
+**Two profiles, not one.** A profile is issued against a single App ID, and the
+widget has its own. Pasting the app's profile into both secrets is the easy
+mistake, so the workflow reads the bundle ID out of each profile and fails with
+the mismatch named rather than letting it become a signing error twenty minutes
+later.
+
+You do not have to record the profile *names* anywhere: the workflow reads them
+out of the profiles themselves and passes them to the build, so renaming a
+profile in the portal cannot desynchronise anything.
+
+**Why these are needed at all**, given the App Store Connect API key is already
+present: `-allowProvisioningUpdates` genuinely does create profiles on demand —
+but only under *automatic* signing, and automatic signing resolves a Release
+archive to a **development** identity, which cannot sign a TestFlight build.
+Distribution signing therefore has to be manual, and manual signing will not
+invent a profile. That is the whole reason this section exists.
 
 **No Mac? Use the appendix.** Everything above can be done from a browser, and
 the certificate can be made with OpenSSL on Linux or Windows — see
