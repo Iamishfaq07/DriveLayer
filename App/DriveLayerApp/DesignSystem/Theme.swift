@@ -82,6 +82,29 @@ enum DL {
         /// Used for values that update continuously while driving, so they settle
         /// rather than snap.
         static let value = Animation.easeOut(duration: 0.45)
+
+        /// The one physical feel the app has. A spring with a little mass, so things
+        /// arrive rather than appear - used for anything that enters, expands or
+        /// changes state. One curve everywhere is what makes motion read as a system
+        /// instead of a collection of effects.
+        static let arrive = Animation.spring(response: 0.42, dampingFraction: 0.82)
+
+        /// For rings and arcs filling to a value: slower and heavier than `arrive`,
+        /// because a gauge that snaps to 68% tells you nothing about how it got there.
+        static let fill = Animation.spring(response: 0.9, dampingFraction: 0.86)
+
+        /// Stagger between siblings entering together. Short enough that a list of
+        /// six still finishes inside half a second.
+        static let stagger: Double = 0.045
+    }
+
+    /// Depth. Two shadows layered - a tight one for edge definition and a soft one
+    /// for lift - because a single drop shadow looks like a template and no shadow
+    /// looks like a spreadsheet. Both are subtle in light mode and nearly absent in
+    /// dark, where the surface colour already does the separating.
+    enum Elevation {
+        static let cardTight = (radius: CGFloat(1.5), y: CGFloat(1), opacity: 0.10)
+        static let cardSoft = (radius: CGFloat(14), y: CGFloat(6), opacity: 0.08)
     }
 }
 
@@ -169,10 +192,30 @@ extension View {
     }
 
     /// The standard card surface.
-    func dlCard(padding: CGFloat = DL.Spacing.medium) -> some View {
-        self
-            .padding(padding)
-            .background(DLColor.surface, in: RoundedRectangle(cornerRadius: DL.Radius.card, style: .continuous))
+    ///
+    /// A card is a slab, not a rectangle: a faint top-to-bottom gradient so it reads as
+    /// lit from above, a hairline border so its edge exists against the background in
+    /// both appearances, and two layered shadows for lift. Every card in the app gets
+    /// this, which is what makes them read as one material.
+    ///
+    /// - Parameter tint: when a card is about a status, that status bleeds very faintly
+    ///   into the surface - enough that a row of cards can be scanned for the amber one
+    ///   without reading a word, not enough to colour the text on it.
+    func dlCard(padding: CGFloat = DL.Spacing.medium, tint: Color? = nil) -> some View {
+        modifier(DLCardSurface(padding: padding, tint: tint))
+    }
+
+    /// A card that lifts slightly under the finger. For anything tappable, so the whole
+    /// surface answers the touch rather than a chevron in the corner.
+    func dlPressable() -> some View {
+        buttonStyle(DLPressableCardStyle())
+    }
+
+    /// Slides and fades a view in on appear, with an optional stagger index so a
+    /// column of cards arrives as a cascade rather than all at once. Nothing moves
+    /// when Reduce Motion is on; the content simply appears.
+    func dlArrive(index: Int = 0) -> some View {
+        modifier(DLArrival(index: index))
     }
 
     func dlScreenPadding() -> some View {
