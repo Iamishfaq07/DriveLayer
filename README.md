@@ -167,7 +167,7 @@ It runs by hand from the Actions tab and takes everything Apple-specific from
 repository secrets — no team ID, certificate or key is committed.
 
 [RELEASE.md](docs/RELEASE.md) is the one-time setup: the Developer Program
-membership, the identifiers and App Group to register, the six secrets and where
+membership, the identifiers and App Group to register, the eight secrets and where
 each comes from, and what to expect on the first real drive. CarPlay is not part
 of that build and cannot be until Apple grants the driving-task entitlement; the
 phone app in a mount does the same job in the meantime.
