@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"]
+    # `fix/**` is here because it was not, and the omission was quiet: a push to a
+    # branch outside this list ran nothing at all, and the only reason it was not
+    # missed is that `pull_request` below is unrestricted, so CI started when the
+    # PR was opened. Naming branch prefixes at all is a trap of this shape; these
+    # are the three the project actually uses.
+    branches: [main, "claude/**", "fix/**", "harrier/**"]
   pull_request:
   workflow_dispatch:
 
