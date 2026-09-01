@@ -129,11 +129,22 @@ final class AppEnvironment {
 
     func connect(toAdapter id: UUID, name: String) async {
         settings.useSimulator = false
-        settings.lastAdapterIdentifier = id.uuidString
-        settings.lastAdapterName = name
         drive.setWeatherProvider(WeatherKitProvider())
         drive.setRouteProvider(MapKitRouteProvider())
         await obd.connect(source: .bluetooth(peripheralID: id, name: name))
+
+        // Remembered only once the adapter has actually answered. These two settings are
+        // what `connectIfPossible()` reconnects to on every launch, and they used to be
+        // written before the connection was attempted - so tapping a pair of headphones on
+        // the pairing screen, or an adapter that never completed its ELM handshake, became
+        // "the driver's adapter" permanently. Every subsequent launch then spent its
+        // connection attempt on a device that cannot answer.
+        //
+        // `obd.isConnected` is the session reporting a usable link, not CoreBluetooth
+        // reporting a socket, so this is the validated state rather than a hopeful one.
+        guard obd.isConnected else { return }
+        settings.lastAdapterIdentifier = id.uuidString
+        settings.lastAdapterName = name
         rememberConnectedAdapter()
     }
 
