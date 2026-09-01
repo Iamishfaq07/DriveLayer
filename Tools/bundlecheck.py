@@ -87,6 +87,25 @@ def check_app_plist() -> None:
         problem("Info.plist: LSRequiresIPhoneOS must be true, or the bundle is held "
                 "to iPad's multitasking rules.")
 
+    # "you need to include all of the ... orientations to support iPad
+    # multitasking" (90474). An iPhone-only app is exempt, but only if the bundle
+    # actually says iPhone-only. Apple reads UIDeviceFamily, so being iPhone-only
+    # in one place and silent in the other is what got the build rejected.
+    families = data.get("UIDeviceFamily")
+    orientations = data.get("UISupportedInterfaceOrientations") or []
+    ipad_capable = families is None or 2 in families
+    all_four = {
+        "UIInterfaceOrientationPortrait",
+        "UIInterfaceOrientationPortraitUpsideDown",
+        "UIInterfaceOrientationLandscapeLeft",
+        "UIInterfaceOrientationLandscapeRight",
+    }
+    if ipad_capable and not all_four.issubset(set(orientations)):
+        problem("Info.plist: the bundle is iPad-capable (UIDeviceFamily missing or "
+                "includes 2) but does not declare all four orientations, which Apple "
+                "requires for iPad multitasking. Either set UIDeviceFamily to [1] for "
+                "iPhone only, or declare all four.")
+
 
 def check_widget_plist() -> None:
     path = REPO / "App/DriveLayerWidgets/Info.plist"
