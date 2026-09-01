@@ -801,3 +801,70 @@ last good value as `suspect` with its reason, or stays absent — never zero.
 `vehicleSpeedKmh`) rather than carried as data. That is a wider change than this pass, and
 the naming convention makes the current state safe rather than merely lucky. Recorded so
 it is visible instead of assumed complete.
+
+---
+
+# Product surface audit — after the first device install
+
+The first TestFlight build reached a phone, and the verdict was "looks cheap, no
+animations, no graphics". That is a finding, and it was checked before being acted on.
+
+| # | Finding | Classification |
+|---|---|---|
+| S-1 | Hyperion had no screen on the phone | **CONFIRMED** · fixed |
+| S-2 | Ask Harrier did not read the Hyperion assessment | **CONFIRMED** · fixed |
+| S-3 | One animation in the entire app | **CONFIRMED** · fixed |
+| S-4 | Trip polylines stored, never rendered | **CONFIRMED** · fixed |
+| S-5 | Telemetry formatter mis-rendered trims and pressures | **CONFIRMED** · fixed |
+| S-6 | Simulator controls exposed in Release | **NOT APPLICABLE** — already gated |
+| S-7 | CI push trigger skipped `feature/**` | **CONFIRMED** · fixed |
+
+## S-1 · Hyperion — CONFIRMED
+
+`grep hyperion App/` found two lines, both in `CarPlayPresenter.swift`: a single
+`CPListItem` showing the overall label. `HyperionAssessment` - six areas, each with a
+status, headline, detail, baseline comparison, confidence and evidence - was computed on
+every analysis pass and shown to a phone user nowhere. The P1-12 entry in ROADMAP read
+"IMPLEMENTED — 2 of 6 areas assessed", which was true of the analysis and silent about
+the surface. It now has a tab.
+
+## S-2 · Ask Harrier — CONFIRMED
+
+`engineStatus` answered from `snapshot.health.systems["Engine"]`: one word. The
+`VehicleContextSnapshot` had a `DieselSummary` and no Hyperion section at all, on a
+petrol-only product. So the Hyperion screen could say "intake running warm, low
+confidence" and the copilot, asked the same second, said "normal". A `HyperionSummary`
+now travels in the snapshot, built from the same assessment, and four intents answer
+from it.
+
+One invention caught in my own first draft of the faults answer, and worth recording
+because it is the failure class this product is most about: with no codes and no
+diagnostics area it said "the warning light is off". Nobody had read the lamp. It now
+says the lamp is unread, and a test pins that.
+
+## S-3 · Motion — CONFIRMED
+
+`grep` for `withAnimation`, `.animation(`, `.transition(`, `sensoryFeedback`,
+`symbolEffect` and `matchedGeometryEffect` across the app returned one hit: the speed
+number on Drive Mode. Every card was a flat fill; every screen popped into existence
+fully formed. The design system's own comment described "a calm instrument panel".
+
+The fix is one material and one spring applied everywhere, which is what stops a
+redesign producing six different-looking screens. Reduce Motion drops every translation
+and scale and keeps every fade; that was checked per component, not assumed.
+
+## S-6 · Simulator in Release — NOT APPLICABLE
+
+The brief asked for `#if DEBUG` around the simulator toggle. It was already there, one
+level up: `AppSettings.isSimulatorAvailable` is `#if DEBUG`, the toggle's section is
+behind it, and the stored `useSimulator` flag is ANDed with it on load - so a debug build
+that left the flag on cannot make a release build simulate. Left as is; scattering
+`#if DEBUG` through the views would be worse than the single gate.
+
+## What CI cannot verify here
+
+Every screen in this pass compiles and its tests pass, on real Xcode. None of it has
+been rendered: there is no simulator or device in this environment. Shadow intensity in
+light mode, the panel highlight, and whether the cascade feels quick or slow are all
+things the next TestFlight install will show before I see them. That is stated in the
+PR rather than left to be discovered.

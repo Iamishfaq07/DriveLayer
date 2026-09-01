@@ -456,7 +456,7 @@ Route terrain is **MOCK ONLY**: `MockElevationProvider` is the sole conformer of
 | Item | Status |
 |---|---|
 | Hyperion as a primary surface | **IMPLEMENTED** — its own tab, an overall ring, six expandable cards with reasoning and evidence, a learning card. `HyperionAssessment` was previously read by one CarPlay row and nothing on the phone. |
-| Ask Harrier | **PARTIAL** — the wording, the conversation behaviour (answers scroll into view, suggestions as pressable cards), and the CarPlay header are done. The structured `HyperionSummary` in the copilot context is not: `CopilotContext` still carries `dieselAssessment` and no Hyperion block. |
+| Ask Harrier | **IMPLEMENTED** — wording, conversation behaviour, and a `HyperionSummary` in the copilot context built from the same assessment the screen shows. Four new intents (turbo, fuel system, warm-up, faults) answer from it; baseline comparisons are labelled inferences, low confidence is a stated limitation, unassessed areas explain why. `dieselAssessment` remains in the context for the dormant diesel path and is unreachable on a petrol profile. |
 | Design system: material, motion, graphics | **IMPLEMENTED** — one card material with light, edge and depth; one spring for everything that enters; `StatusRing`, `LiveDot`, `FillBar`, `RollingNumber`, `RouteGlyph`, `PanelBackground`, `RoadMark`. Reduce Motion drops every translation and keeps every fade. |
 | Trips: route glyphs | **IMPLEMENTED** — every drive draws its own shape at 44pt in the list and 140pt in detail; the polyline was previously stored and rendered nowhere. |
 | Drive Mode controls | **IMPLEMENTED** — 56pt primary buttons with haptic release, replacing 34pt stock buttons as the two most-tapped targets in a car. |
