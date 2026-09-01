@@ -73,7 +73,7 @@ struct TodayView: View {
             Button {
                 isShowingCopilot = true
             } label: {
-                Label("Ask copilot", systemImage: "bubble.left.and.text.bubble.right")
+                Label("Ask Harrier", systemImage: "bubble.left.and.text.bubble.right")
             }
         }
     }

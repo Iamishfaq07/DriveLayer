@@ -106,7 +106,7 @@ final class CarPlayPresenter {
             }
             return item
         }
-        return CPListSection(items: items, header: "Ask copilot", sectionIndexTitle: nil)
+        return CPListSection(items: items, header: "Ask Harrier", sectionIndexTitle: nil)
     }
 
     private func answer(_ question: String) {
