@@ -15,12 +15,26 @@ struct OnboardingView: View {
         case welcome, vehicle, capabilities, permissions, adapter, ready
     }
 
+    /// Which way the last step change went, so the transition slides the right way:
+    /// forward content enters from the right, going back it enters from the left.
+    @State private var isAdvancing = true
+
     var body: some View {
         VStack(spacing: 0) {
-            ProgressView(value: Double(step.rawValue), total: Double(Step.allCases.count - 1))
-                .tint(DLColor.accent)
-                .padding(.horizontal, DL.Spacing.screen)
-                .padding(.top, DL.Spacing.small)
+            // Six small segments rather than one bar: the driver can see how many
+            // steps there are and which one they are on, which a continuous bar hides.
+            HStack(spacing: DL.Spacing.tight) {
+                ForEach(Step.allCases, id: \.rawValue) { candidate in
+                    Capsule()
+                        .fill(candidate.rawValue <= step.rawValue ? DLColor.accent : DLColor.primaryText.opacity(DL.Opacity.fill))
+                        .frame(height: 3)
+                }
+            }
+            .animation(DL.Motion.standard, value: step)
+            .padding(.horizontal, DL.Spacing.screen)
+            .padding(.top, DL.Spacing.small)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Step \(step.rawValue + 1) of \(Step.allCases.count)"))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: DL.Spacing.large) {
@@ -35,27 +49,43 @@ struct OnboardingView: View {
                 }
                 .dlScreenPadding()
                 .padding(.vertical, DL.Spacing.section)
+                // Each step is its own identity, so changing step replaces the content
+                // with a slide rather than mutating it in place.
+                .id(step)
+                .transition(.asymmetric(
+                    insertion: .move(edge: isAdvancing ? .trailing : .leading).combined(with: .opacity),
+                    removal: .move(edge: isAdvancing ? .leading : .trailing).combined(with: .opacity)))
             }
+            .animation(DL.Motion.arrive, value: step)
 
             footer
         }
-        .background(DLColor.background)
+        .background(PanelBackground())
     }
 
     // MARK: - Steps
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: DL.Spacing.medium) {
+            // The mark, the same road-to-horizon as the app icon, so the first screen
+            // and the home screen are visibly the same thing. Drawn rather than an
+            // image: it scales to any size and takes the current appearance.
+            RoadMark()
+                .frame(width: 96, height: 96)
+                .dlArrive(index: 0)
             Text("DriveLayer")
-                .dlFont(.hero)
+                .dlFont(.hero, weight: .bold)
                 .foregroundStyle(DLColor.primaryText)
+                .dlArrive(index: 1)
             Text("Intelligence for the car you already own.")
                 .font(DL.Font.title)
                 .foregroundStyle(DLColor.secondaryText)
+                .dlArrive(index: 2)
             Text("DriveLayer reads your car, the road, the weather and your own driving history, and tells you what actually matters. It listens to your car — it never controls it.")
                 .font(DL.Font.body)
                 .foregroundStyle(DLColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+                .dlArrive(index: 3)
         }
     }
 
@@ -192,24 +222,37 @@ struct OnboardingView: View {
     }
 
     private var footer: some View {
-        HStack {
-            if step != .welcome {
-                Button("Back") {
-                    step = Step(rawValue: step.rawValue - 1) ?? .welcome
-                }
-                .buttonStyle(.bordered)
+        VStack(spacing: DL.Spacing.small) {
+            Button {
+                advance()
+            } label: {
+                Text(step == .ready ? "Start driving" : "Continue")
+                    .contentTransition(.interpolate)
             }
-            Spacer()
-            Button(step == .ready ? "Start driving" : "Continue") { advance() }
-                .buttonStyle(.borderedProminent)
-                .tint(DLColor.accent)
-                .disabled(step == .vehicle && draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+            .dlPrimaryButton()
+            .disabled(step == .vehicle && draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+            .opacity(step == .vehicle && draftName.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+
+            // Back is a text button beneath, not a peer of Continue. The forward action
+            // is the one a new user wants; making both the same weight made people
+            // hesitate over which was which.
+            Button("Back") {
+                isAdvancing = false
+                step = Step(rawValue: step.rawValue - 1) ?? .welcome
+            }
+            .font(DL.Font.callout)
+            .foregroundStyle(DLColor.secondaryText)
+            .opacity(step == .welcome ? 0 : 1)
+            .disabled(step == .welcome)
+            .frame(minHeight: 32)
         }
+        .animation(DL.Motion.standard, value: step)
         .dlScreenPadding()
         .padding(.bottom, DL.Spacing.medium)
     }
 
     private func advance() {
+        isAdvancing = true
         if step == .vehicle {
             let vehicle = Vehicle(nickname: draftName.trimmingCharacters(in: .whitespaces),
                                   profileID: draftProfileID,
