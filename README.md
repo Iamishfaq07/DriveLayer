@@ -28,13 +28,14 @@ The development environment for this work had **no Swift toolchain**: `swift.org
 blocked by the sandbox's egress policy, and there is no macOS, no Xcode, and no iOS
 SDK. Nothing could be compiled locally.
 
-So compilation was moved to CI. `.github/workflows/ci.yml` runs three jobs, and **all
-three pass**:
+So compilation was moved to CI. `.github/workflows/ci.yml` runs four jobs, and **all
+four pass**:
 
 | Job | Runner | What it proves |
 |---|---|---|
-| Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths |
+| Static checks | `ubuntu-latest` | swiftcheck: brackets, unknown types, member references, import policy, read-only banned APIs, `project.yml` paths — plus actionlint and shellcheck over the workflows themselves |
 | Core tests | `macos-14` | `DriveLayerCore` compiles and its **263 tests across 35 suites** pass |
+| App tests | `macos-15` | The stores, services and coordinator pass against SwiftData, CoreLocation and friends — the layer `swift test` cannot reach |
 | App build | `macos-15` | The app and widget extension compile for the iOS Simulator |
 
 What is still **not** verified, and needs hardware:
@@ -160,7 +161,7 @@ It runs by hand from the Actions tab and takes everything Apple-specific from
 repository secrets — no team ID, certificate or key is committed.
 
 [RELEASE.md](docs/RELEASE.md) is the one-time setup: the Developer Program
-membership, the identifiers and App Group to register, the six secrets and where
+membership, the identifiers and App Group to register, the eight secrets and where
 each comes from, and what to expect on the first real drive. CarPlay is not part
 of that build and cannot be until Apple grants the driving-task entitlement; the
 phone app in a mount does the same job in the meantime.

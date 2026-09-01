@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the required secrets are present
         env:
@@ -35,6 +35,8 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          APP_PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          WIDGET_PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_WIDGET_BASE64 }}
         run: |
           # Fail here with a readable list rather than forty lines into xcodebuild.
           #
@@ -51,6 +53,8 @@ jobs:
           require KEY_ID        APP_STORE_CONNECT_KEY_ID
           require ISSUER_ID     APP_STORE_CONNECT_ISSUER_ID
           require PRIVATE_KEY   APP_STORE_CONNECT_PRIVATE_KEY
+          require APP_PROFILE   BUILD_PROVISION_PROFILE_BASE64
+          require WIDGET_PROFILE BUILD_PROVISION_PROFILE_WIDGET_BASE64
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing"
             echo "See docs/RELEASE.md for how to create each one."
@@ -158,6 +162,71 @@ jobs:
 
           rm "$RUNNER_TEMP/certificate.p12"
 
+      - name: Install the provisioning profiles
+        id: profiles
+        env:
+          APP_PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          WIDGET_PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_WIDGET_BASE64 }}
+        run: |
+          set -euo pipefail
+          # Manual signing needs the profiles on disk, in the directory Xcode
+          # looks in, and needs their *names* to pass to the build. The name is
+          # inside the profile, so it is read out here rather than stored as two
+          # more secrets that could drift from the files they describe.
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+
+          fail() { echo "::error::$1"; shift; for line in "$@"; do echo "  $line"; done; exit 1; }
+
+          # $1 = base64 of the profile, $2 = secret name for errors,
+          # $3 = bundle ID it must match, $4 = output name to publish
+          install_profile() {
+            raw="$1"; secret="$2"; expect_bundle="$3"; output="$4"
+
+            tmp="$RUNNER_TEMP/$output.mobileprovision"
+            if ! printf '%s' "$raw" | base64 --decode > "$tmp" 2>/dev/null || [ ! -s "$tmp" ]; then
+              fail "$secret is not valid base64." \
+                   "Re-encode the .mobileprovision and paste the whole output. See docs/RELEASE.md 4b."
+            fi
+
+            # A .mobileprovision is CMS-signed; the plist has to be unwrapped first.
+            plist="$RUNNER_TEMP/$output.plist"
+            if ! security cms -D -i "$tmp" > "$plist" 2>/dev/null; then
+              fail "$secret is not a provisioning profile." \
+                   "Download the profile itself, not a certificate or an App ID."
+            fi
+
+            name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist" 2>/dev/null || true)"
+            app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist" 2>/dev/null || true)"
+            [ -n "$name" ] || fail "$secret has no Name field, so it cannot be a usable profile."
+
+            # application-identifier is TEAMID.bundle.id; drop the team prefix.
+            bundle="${app_id#*.}"
+            if [ "$bundle" != "$expect_bundle" ]; then
+              fail "$secret is for '$bundle', but this target needs '$expect_bundle'." \
+                   "The app and the widget need separate profiles - it is easy to paste one twice." \
+                   "See docs/RELEASE.md 4b."
+            fi
+
+            # Xcode matches by UUID in the filename, not by the name of the file
+            # you downloaded.
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")"
+            cp "$tmp" "$PROFILE_DIR/$uuid.mobileprovision"
+
+            if ! /usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$plist" >/dev/null 2>&1; then
+              echo "::warning::Could not read the expiry date of $secret."
+            else
+              expiry="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$plist")"
+              echo "$secret: '$name' for $bundle, expires $expiry"
+            fi
+
+            echo "$output=$name" >> "$GITHUB_OUTPUT"
+            rm -f "$plist" "$tmp"
+          }
+
+          install_profile "$APP_PROFILE"    BUILD_PROVISION_PROFILE_BASE64        com.drivelayer.app         app_profile_name
+          install_profile "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 com.drivelayer.app.widgets widget_profile_name
+
       - name: Write the App Store Connect API key
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -176,60 +245,63 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+          APP_PROFILE_NAME: ${{ steps.profiles.outputs.app_profile_name }}
+          WIDGET_PROFILE_NAME: ${{ steps.profiles.outputs.widget_profile_name }}
         run: |
           set -o pipefail
-          # -allowProvisioningUpdates with an API key lets Xcode create and fetch
-          # the profiles for both the app and the widget extension, so no
-          # provisioning profile has to be stored as a secret and kept in step.
-          # project.yml sets CODE_SIGN_STYLE: Automatic for local, IDE-driven
-          # development builds. It does not follow that xcodebuild picks a
-          # distribution identity for a Release archive on its own - two real
-          # runs confirmed Automatic alone resolves to Development every time,
-          # regardless of -configuration. A third real run then confirmed that
-          # naming the identity while still under Automatic does not steer that
-          # resolution either - Xcode calls it a conflict and says outright what
-          # it wants instead: "Set the code signing identity value to Apple
-          # Development... or switch to manual signing." Overriding
-          # CODE_SIGN_STYLE to Manual here is that switch, scoped to this one
-          # invocation, so the identity we supply is trusted rather than
-          # fought. No PROVISIONING_PROFILE_SPECIFIER is set on purpose:
-          # -allowProvisioningUpdates covers profile creation under manual
-          # signing too, which is the entire reason it takes an API key.
+          # Signing settings live in project.yml under the Release config, not
+          # here, because the app and the widget need *different* profiles and a
+          # PROVISIONING_PROFILE_SPECIFIER given on this command line would apply
+          # to both targets at once. Each target reads its own custom setting, so
+          # the two profile names are all that is passed in.
+          #
+          # -allowProvisioningUpdates is deliberately absent. With it, Xcode tries
+          # to resolve signing through the API key and reaches for a *development*
+          # certificate - the first failed run died on "No signing certificate iOS
+          # Development found" while a valid distribution certificate sat in the
+          # keychain. The profiles are now supplied explicitly, so there is nothing
+          # left for it to fetch.
           xcodebuild archive \
             -project DriveLayer.xcodeproj \
             -scheme DriveLayer \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/DriveLayer.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE="Manual" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DRIVELAYER_APP_PROFILE="$APP_PROFILE_NAME" \
+            DRIVELAYER_WIDGET_PROFILE="$WIDGET_PROFILE_NAME" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
       - name: Export the IPA
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_PROFILE_NAME: ${{ steps.profiles.outputs.app_profile_name }}
+          WIDGET_PROFILE_NAME: ${{ steps.profiles.outputs.widget_profile_name }}
         run: |
           set -o pipefail
-          # The team ID is the one value ExportOptions.plist cannot carry, since
-          # it must not be committed.
-          /usr/libexec/PlistBuddy -c "Delete :teamID" Config/ExportOptions.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" Config/ExportOptions.plist
+          # The team ID and the profile names are the values ExportOptions.plist
+          # cannot carry: the team ID must not be committed, and the profile names
+          # are whatever Apple's portal called them. Export is manual now, to match
+          # the archive, so the mapping is written here rather than guessed.
+          PLIST=Config/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Delete :teamID" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" "$PLIST"
 
+          /usr/libexec/PlistBuddy -c "Delete :provisioningProfiles" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$PLIST"
+          /usr/libexec/PlistBuddy \
+            -c "Add :provisioningProfiles:com.drivelayer.app string $APP_PROFILE_NAME" "$PLIST"
+          /usr/libexec/PlistBuddy \
+            -c "Add :provisioningProfiles:com.drivelayer.app.widgets string $WIDGET_PROFILE_NAME" "$PLIST"
+
+          # No -allowProvisioningUpdates and no API key here: the profiles are
+          # named in the plist and already installed, so there is nothing to
+          # fetch. Those flags exist to let Xcode create profiles, and asking it
+          # to do that is what pulled a development identity into the archive.
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/DriveLayer.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist Config/ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID"
+            -exportOptionsPlist "$PLIST"
 
       - name: Upload to TestFlight
         env:
@@ -250,8 +322,11 @@ jobs:
             --apiIssuer "$ISSUER_ID"
 
       - name: Keep the IPA and the build log
-        if: always()
-        uses: actions/upload-artifact@v4
+        # Only worth doing when an .ipa exists. Under `always()` this step ran on
+        # every failed archive and logged "No files were found", which reads like a
+        # second fault next to the real one.
+        if: success()
+        uses: actions/upload-artifact@v7
         with:
           name: drivelayer-ipa
           path: |
