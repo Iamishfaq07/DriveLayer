@@ -148,6 +148,19 @@ build is installable as soon as processing finishes. External testers need a
 review pass, which is where background location will draw questions — you do not
 need external testers to test your own car.
 
+**Export compliance is answered in the Info.plist, not in the dialog.**
+`ITSAppUsesNonExemptEncryption` is set to `false`, so App Store Connect stops
+asking on every upload. The right answer to the dialog, if you ever see it, is
+*"None of the algorithms mentioned above"* — the app implements no cryptography
+at all, and the only encryption near it is iOS file protection on stored
+documents and telemetry, which is the operating system encrypting data at rest
+and is exempt.
+
+That is checked rather than remembered: `bundlecheck` fails if any cryptographic
+API appears while the declaration still says `false`, because the declaration is
+an export statement and quietly becoming untrue is the failure worth preventing.
+It will need revisiting if optional cloud sync (V3) is ever built.
+
 ## 6. CarPlay, honestly
 
 **CarPlay will not work in this build**, and adding the entitlement to the

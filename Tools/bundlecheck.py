@@ -107,6 +107,45 @@ def check_app_plist() -> None:
                 "iPhone only, or declare all four.")
 
 
+def check_export_compliance() -> None:
+    """ITSAppUsesNonExemptEncryption must not become a false statement.
+
+    Declaring `false` stops App Store Connect asking on every upload, which is worth
+    having - but it is an export-compliance declaration, so it has to stay true. If
+    cryptography is ever added, this fails and forces the declaration to be revisited
+    rather than left quietly wrong.
+
+    iOS file protection and HTTPS are exempt and deliberately not listed.
+    """
+    plist = plistlib.loads((REPO / "App/DriveLayerApp/Resources/Info.plist").read_bytes())
+    declared = plist.get("ITSAppUsesNonExemptEncryption")
+
+    if declared is None:
+        note("Info.plist: no ITSAppUsesNonExemptEncryption; App Store Connect will ask "
+             "on every upload.")
+        return
+
+    apis = ("CryptoKit", "CommonCrypto", "CCCrypt", "CC_SHA", "SecKey", "SymmetricKey",
+            "ChaChaPoly", "SecRandomCopyBytes", "Curve25519")
+    hits = []
+    for root in ("Sources", "App"):
+        for path in (REPO / root).rglob("*.swift"):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.strip()
+                if code.startswith("//"):          # a mention in prose is not a call
+                    continue
+                for api in apis:
+                    if api in code:
+                        hits.append(f"{path.relative_to(REPO)}:{number} ({api})")
+
+    if declared is False and hits:
+        problem("Info.plist declares ITSAppUsesNonExemptEncryption=false, but the app "
+                "now uses cryptography: " + "; ".join(hits[:5]) +
+                ". That declaration is an export-compliance statement - revisit it.")
+    elif declared is False:
+        note("export compliance: declared false, and no cryptographic API is called")
+
+
 def check_widget_plist() -> None:
     path = REPO / "App/DriveLayerWidgets/Info.plist"
     data = plistlib.loads(path.read_bytes())
@@ -173,8 +212,8 @@ def check_release_runner() -> None:
             note(f"release.yml: '{job_name}' runs on {runner}")
 
 
-for check in (check_project_spec, check_app_plist, check_widget_plist,
-              check_icon, check_release_runner):
+for check in (check_project_spec, check_app_plist, check_export_compliance,
+              check_widget_plist, check_icon, check_release_runner):
     try:
         check()
     except Exception as error:                      # a broken check is a failure
