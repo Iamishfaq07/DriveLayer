@@ -29,7 +29,7 @@ enum PrivacyLog {
     }
 
     enum Level: String, CaseIterable {
-        case debug, info, error, fault
+        case debug, info, notice, error, fault
     }
 
     private static let subsystem = "com.drivelayer.app"
@@ -44,6 +44,11 @@ enum PrivacyLog {
     /// Something worth knowing about but not a failure.
     static func info(_ category: Category, _ message: String) {
         emit(.info, category, message)
+    }
+
+    /// Worth keeping in the log, but not a failure of anything.
+    static func notice(_ category: Category, _ message: String) {
+        emit(.notice, category, message)
     }
 
     /// A failure the app recovered from, or chose to tolerate.
@@ -130,6 +135,7 @@ enum PrivacyLog {
         switch level {
         case .debug: logger.debug("\(message, privacy: .public)")
         case .info: logger.info("\(message, privacy: .public)")
+        case .notice: logger.notice("\(message, privacy: .public)")
         case .error: logger.error("\(message, privacy: .public)")
         case .fault: logger.fault("\(message, privacy: .public)")
         }
@@ -141,7 +147,7 @@ enum PrivacyLog {
         // command-line test run is worse than a line of noise; debug and info are
         // dropped, since nothing off-platform is a user's device.
         switch level {
-        case .debug, .info:
+        case .debug, .info, .notice:
             return
         case .error, .fault:
             let line = "[\(level.rawValue)] [\(category.rawValue)] \(message)\n"

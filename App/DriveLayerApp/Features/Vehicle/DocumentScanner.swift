@@ -22,7 +22,7 @@ enum DocumentTextRecogniser {
         do {
             try handler.perform([request])
         } catch {
-            PrivacyLog.logger(.app).error("Text recognition failed on a scanned document")
+            PrivacyLog.error(.app, "Text recognition failed on a scanned document")
             return []
         }
 
@@ -96,7 +96,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController,
                                           didFailWithError error: Error) {
-            PrivacyLog.logger(.app).error("The document scanner failed")
+            PrivacyLog.error(.app, "The document scanner failed")
             parent.onCancel()
         }
     }

@@ -52,7 +52,7 @@ final class LiveActivityController {
             lastUpdate = Date()
         } catch {
             // A refused Live Activity is not worth interrupting a drive over.
-            PrivacyLog.logger(.app).notice("Live Activity could not be started")
+            PrivacyLog.notice(.app, "Live Activity could not be started")
         }
         #endif
     }

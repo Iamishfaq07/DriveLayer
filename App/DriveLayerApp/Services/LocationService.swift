@@ -188,6 +188,6 @@ extension LocationService: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // A transient failure is normal in a tunnel or a car park; it is logged
         // without precise coordinates and without interrupting the drive.
-        PrivacyLog.logger(.location).notice("Location update failed")
+        PrivacyLog.notice(.location, "Location update failed")
     }
 }
