@@ -31,6 +31,21 @@
 
 	<key>UILaunchScreen</key>
 	<dict/>
+
+	<!-- iPhone only (1 = iPhone/iPod, 2 = iPad). Stated here as well as in
+	     TARGETED_DEVICE_FAMILY because this is the value Apple's validator reads,
+	     and the previous upload was rejected for not supporting iPad multitasking
+	     while the build setting said iPhone. Declaring the device family in the
+	     plist removes the ambiguity.
+
+	     The rejection offered a second route - declare all four orientations - and
+	     that would be untrue. DriveLayer is a portrait phone app used in a car
+	     mount; claiming landscape would ship a layout nobody has designed. -->
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+	</array>
+
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
