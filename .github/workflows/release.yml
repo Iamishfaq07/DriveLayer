@@ -21,7 +21,17 @@ on:
 jobs:
   testflight:
     name: Archive and upload
-    runs-on: macos-15
+    # macos-26, not macos-15, and this is a hard requirement rather than a
+    # preference. Apple now refuses any upload built against an SDK older than
+    # iOS 26: "All iOS and iPadOS apps must be built with the iOS 26 SDK or
+    # later, included in Xcode 26 or later". macos-15 ships Xcode 16.4 and the
+    # iOS 18.5 SDK, so every archive it produces is rejected at validation -
+    # after a full build, which is a slow way to find out.
+    #
+    # CI's build jobs stay on macos-15 deliberately: they prove the code
+    # compiles, and moving them is a separate change with its own risk. Only the
+    # artefact Apple actually receives has to be built with the current SDK.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:

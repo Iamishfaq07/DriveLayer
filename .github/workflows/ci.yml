@@ -27,6 +27,13 @@ jobs:
       - name: Run swiftcheck
         run: python3 Tools/swiftcheck.py Sources Tests App
 
+      # Cheap, and it belongs here rather than in the release job: a bundle
+      # misconfiguration is otherwise only discovered by Apple rejecting an upload,
+      # which costs a full archive and happens weeks apart. Every rule in it is
+      # something a real TestFlight validation already refused.
+      - name: Check the bundle configuration
+        run: python3 Tools/bundlecheck.py
+
       # The release workflow is run by hand, months apart, and a broken one is
       # discovered by a failed TestFlight upload rather than by CI. actionlint
       # checks the workflows themselves — expressions, contexts, action inputs —
