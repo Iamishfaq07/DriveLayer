@@ -6,5 +6,7 @@
 	<array>
 		<string>group.com.drivelayer.app</string>
 	</array>
+	<key>com.apple.developer.carplay-driving-task</key>
+	<true/>
 </dict>
 </plist>
