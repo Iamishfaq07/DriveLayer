@@ -43,6 +43,11 @@ final class CarPlayPresenter {
     private var alertedInsightID: String?
     private var isAlertPresented = false
 
+    /// Speech capture for the voice entry point. On-device only, and it refuses to
+    /// listen at all on a phone that cannot recognise speech locally.
+    private let voice = VoiceCapture()
+    private static let listeningStateIdentifier = "listening"
+
     /// CarPlay connects on its own scene, so it needs a reference to the running app's
     /// state. This is the one place a shared instance is justified.
     private var environment: AppEnvironment? { AppEnvironment.active }
@@ -79,6 +84,8 @@ final class CarPlayPresenter {
     func stop() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        // The car is gone; a microphone still open would have nothing to show for it.
+        voice.cancel()
     }
 
     // MARK: - Building
@@ -243,7 +250,20 @@ final class CarPlayPresenter {
     /// one already routes to a real, non-stub answer, the same ones the phone app's
     /// copilot gives. A list scrolls; there was never a reason to cut it down to four.
     private func copilotSection() -> CPListSection {
-        let items = LocalCopilot.exampleQuestions.map { question -> CPListItem in
+        var items: [CPListItem] = []
+
+        // Speaking comes first because it is the only entry here that takes a question
+        // this list does not already contain.
+        if #available(iOS 27.0, *) {
+            let speak = CPListItem(text: "Ask a question", detailText: "Speak to Harrier")
+            speak.handler = { [weak self] _, completion in
+                self?.listen()
+                completion()
+            }
+            items.append(speak)
+        }
+
+        items += LocalCopilot.exampleQuestions.map { question -> CPListItem in
             let item = CPListItem(text: question, detailText: nil)
             item.handler = { [weak self] _, completion in
                 self?.answer(question)
@@ -254,12 +274,67 @@ final class CarPlayPresenter {
         return CPListSection(items: items, header: "Ask Harrier", sectionIndexTitle: nil)
     }
 
+    /// A question whose answer is already computed. The rule matcher answers these
+    /// instantly and exactly; handing them to a language model would add latency and
+    /// no accuracy, which is the wrong trade at the wheel.
     private func answer(_ question: String) {
         guard let environment else { return }
         let snapshot = environment.drive.copilotSnapshot()
         let answer = LocalCopilot.respond(to: question, snapshot: snapshot)
         // The spoken form, not the detailed one: this is being read at the wheel.
         presentInformation(title: question, lines: [answer.spokenText])
+    }
+
+    // MARK: - Voice
+
+    /// Listens, then answers whatever was actually asked.
+    ///
+    /// `CPVoiceControlTemplate` became available to a driving-task app in iOS 27;
+    /// before that this list was the only way to ask anything, which is why the entry
+    /// point above is gated rather than the template merely being avoided.
+    ///
+    /// CarPlay requires that recording only happens while this template is on screen,
+    /// and that is also the honest thing to show: the template going up is the
+    /// driver's evidence that the microphone is open, and it coming down is the
+    /// evidence that it closed.
+    @available(iOS 27.0, *)
+    private func listen() {
+        guard let environment else { return }
+        let listening = CPVoiceControlState(identifier: Self.listeningStateIdentifier,
+                                            titleVariants: ["Listening…", "Listening"],
+                                            image: nil,
+                                            repeats: false)
+        let template = CPVoiceControlTemplate(voiceControlStates: [listening])
+        interfaceController.presentTemplate(template, animated: true, completion: nil)
+
+        Task { @MainActor in
+            let unavailable = await voice.start { [weak self] transcript in
+                self?.answerSpoken(transcript, environment: environment)
+            }
+            if let unavailable {
+                // Nothing is listening, so the template would be a lie. Take it down
+                // and say why in the same breath.
+                interfaceController.dismissTemplate(animated: true, completion: nil)
+                presentInformation(title: "Can't listen", lines: [unavailable.message])
+            }
+        }
+    }
+
+    /// Answers a spoken question through the model-backed copilot.
+    ///
+    /// This is the one place the model earns its latency: a sentence a driver actually
+    /// said will rarely match the rule matcher's keywords, and `FoundationModelsCopilot`
+    /// falls back to that matcher by itself when the model cannot help. Its answer is
+    /// still guarded, so speaking cannot get a number past a check that typing could not.
+    @available(iOS 27.0, *)
+    private func answerSpoken(_ question: String, environment: AppEnvironment) {
+        let snapshot = environment.drive.copilotSnapshot()
+        Task { @MainActor in
+            let answer = try? await FoundationModelsCopilot().answer(question: question, snapshot: snapshot)
+            interfaceController.dismissTemplate(animated: true, completion: nil)
+            presentInformation(title: question,
+                               lines: [answer?.spokenText ?? "I couldn't work that one out. Try one of the questions in the list."])
+        }
     }
 
     // MARK: - Critical alert
