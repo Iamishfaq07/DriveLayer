@@ -284,6 +284,7 @@ App Scene WindowGroup Settings DocumentGroup ScenePhase UIApplication UIApplicat
 UIViewController UIView UIColor UIFont UIImage UIScreen UIDevice UIImpactFeedbackGenerator
 UINotificationFeedbackGenerator UIApplicationDelegateAdaptor UISceneConfiguration
 UISceneSession UIWindowSceneDelegate UIScene UISceneConnectionOptions
+SymbolConfiguration SymbolWeight SymbolScale
 ProgressView Label Menu ContextMenu Alert Sheet ToolbarItem ToolbarItemGroup
 ContentUnavailableView Chart BarMark LineMark AreaMark PointMark RuleMark
 AxisMarks AxisValueLabel AxisGridLine ChartProxy PlottableValue
