@@ -61,15 +61,29 @@ Enforced through `PrivacyLog`, which is the only logging entry point:
 **Weather, and only weather.** When enabled, DriveLayer asks Apple's WeatherKit for
 conditions at a location. That is the only outbound request the app makes.
 
-The AI copilot ships as an **on-device, deterministic** implementation. It does not
-call a model, does not need a network, and cannot invent a sensor reading.
+**The copilot does not change that, and it now uses a language model.** DriveLayer
+asks Apple's on-device system model (Foundation Models) through
+`FoundationModelsCopilot`. That model runs on the iPhone itself: there is no request,
+no API key, no account, and nothing about your car leaves the device to answer a
+question. `requiresNetwork` on that provider is `false` and means it.
 
-The architecture for a future model-backed copilot is deliberately shaped around this
-constraint: `CopilotProviding` takes a `VehicleContextSnapshot`, never raw telemetry.
-A snapshot is a few dozen summarised fields — health statuses, trip summaries, fuel
-figures, recent insight headlines — with **no route, no coordinates, no VIN, no
-registration and no telemetry stream**. A test asserts exactly that. Any future
-provider physically cannot be handed data the snapshot does not contain.
+What the model is allowed to see is a `VehicleContextSnapshot` rendered as a flat
+fact sheet — nothing else, ever. A snapshot is a few dozen summarised fields — health
+statuses, trip summaries, fuel figures, recent insight headlines — with **no route,
+no coordinates, no VIN, no registration and no telemetry stream**. A test asserts
+exactly that. `CopilotProviding` takes a snapshot rather than telemetry precisely so
+that a model provider physically cannot be handed data the snapshot does not contain.
+
+What the model is allowed to *say* is checked rather than trusted. Every number in a
+generated answer must be a number it was given; if it rounds one, converts one, does
+arithmetic, or invents a reading outright, the answer is discarded and the
+deterministic copilot answers instead. That check (`AnswerGuard`) is a pure function
+in the core with tests written from the direction of an attack, because "a model
+would not do that" is not a safety mechanism.
+
+If the model is unavailable — an older iPhone, Apple Intelligence switched off, the
+model still downloading — the deterministic `LocalCopilot` answers everything, as it
+did before, and the app tells you which one is talking rather than quietly degrading.
 
 ## Your controls
 

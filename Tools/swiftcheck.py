@@ -348,6 +348,7 @@ CPListTemplateItem CPSelectableListItem CPMessageListItem CPTemplateApplicationD
 CPInstrumentClusterController CPManeuver CPTravelEstimates CPTrip CPRouteChoice
 WidgetKind AppIntentTimelineProvider ConfigurationAppIntent WidgetInfo
 ActivityViewContext ActivityPreviewViewKind AlertConfiguration ActivityFamily
+FoundationModels SystemLanguageModel LanguageModelSession GenerationError
 EntityIdentifier IntentAuthenticationPolicy AppShortcutPhrase ShortcutTileColor
 FileProtection FileAttributeKey URLResourceValues URLResourceKey URLFileProtection
 SecAccessControl SecAccessControlCreateFlags CFString CFDictionary OSStatus
@@ -406,6 +407,10 @@ FORBIDDEN_CORE_IMPORTS = {
     "SwiftUI", "UIKit", "CoreBluetooth", "CoreLocation", "CoreMotion", "WeatherKit",
     "SwiftData", "WidgetKit", "ActivityKit", "CarPlay", "MapKit", "AppIntents",
     "VisionKit", "Vision", "Charts",
+    # The core decides what is safe to say to a driver, and that reasoning has to stay
+    # testable by `swift test` on any machine. A language model in here would put the
+    # rules that bound it on the far side of a framework the test runner may not have.
+    "FoundationModels",
 }
 
 # (pattern, reason, paths where the pattern is legitimate)

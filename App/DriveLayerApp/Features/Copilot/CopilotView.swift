@@ -2,9 +2,14 @@ import SwiftUI
 
 /// The copilot conversation.
 ///
-/// Answers come from `LocalCopilot`: on-device, deterministic, and unable to invent a
-/// sensor reading. Every sentence carries a badge saying whether it is a measurement,
-/// an estimate, an inference or general information — which is the whole point.
+/// Answers come from `FoundationModelsCopilot`, which asks the on-device system model
+/// and checks what comes back: any answer containing a number the model was not given
+/// is thrown away and `LocalCopilot` — deterministic, and unable to invent a sensor
+/// reading — answers instead. On a device without Apple Intelligence that fallback is
+/// the whole path, and the screen behaves exactly as it did before.
+///
+/// Every sentence still carries a badge saying whether it is a measurement, an
+/// estimate, an inference or general information — which is the whole point.
 struct CopilotView: View {
 
     @Environment(AppEnvironment.self) private var environment
@@ -12,6 +17,9 @@ struct CopilotView: View {
 
     @State private var question = ""
     @State private var exchanges: [Exchange] = []
+    /// The model takes a moment where the rule matcher took none. Without this the
+    /// screen looks like it ignored the question.
+    @State private var pendingQuestion: String?
 
     struct Exchange: Identifiable {
         let id = UUID()
@@ -34,6 +42,11 @@ struct CopilotView: View {
                                     .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                             removal: .opacity))
                             }
+                            if let pendingQuestion {
+                                PendingExchangeView(question: pendingQuestion)
+                                    .id("pending")
+                                    .transition(.opacity)
+                            }
                         }
                         .dlScreenPadding()
                         .padding(.vertical, DL.Spacing.medium)
@@ -46,6 +59,11 @@ struct CopilotView: View {
                     // had. Scrolling to it is the difference between a conversation and
                     // a form that quietly grew a row.
                     .onChange(of: exchanges.count) { _, _ in
+                        withAnimation(DL.Motion.arrive) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                    // The question needs to scroll into view as it is asked, not only
+                    // when the answer lands - otherwise the wait happens off-screen.
+                    .onChange(of: pendingQuestion) { _, _ in
                         withAnimation(DL.Motion.arrive) { proxy.scrollTo("bottom", anchor: .bottom) }
                     }
                 }
@@ -72,6 +90,16 @@ struct CopilotView: View {
                     .font(DL.Font.callout)
                     .foregroundStyle(DLColor.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                // Which copilot is answering, said plainly. A driver on a device
+                // without Apple Intelligence gets the deterministic one, and is told
+                // that rather than left to wonder why the answers read differently.
+                if let reason = FoundationModelsCopilot.unavailabilityReason {
+                    Text(reason)
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, DL.Spacing.tight)
+                }
             }
             .padding(.bottom, DL.Spacing.small)
             .dlArrive(index: 0)
@@ -149,13 +177,42 @@ struct CopilotView: View {
 
     private func ask(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, pendingQuestion == nil else { return }
         let snapshot = environment.drive.copilotSnapshot()
-        let answer = LocalCopilot.respond(to: trimmed, snapshot: snapshot)
-        withAnimation(DL.Motion.arrive) {
-            exchanges.append(Exchange(question: trimmed, answer: answer))
-        }
         question = ""
+        withAnimation(DL.Motion.quick) { pendingQuestion = trimmed }
+
+        Task {
+            // The copilot falls back to the deterministic answer on its own, so there
+            // is no failure here a driver needs to see - `try?` collapses a thrown
+            // error into the same "ask again" outcome an empty answer would give.
+            let answer = try? await FoundationModelsCopilot().answer(question: trimmed, snapshot: snapshot)
+            withAnimation(DL.Motion.arrive) {
+                pendingQuestion = nil
+                if let answer {
+                    exchanges.append(Exchange(question: trimmed, answer: answer))
+                }
+            }
+        }
+    }
+
+}
+
+/// The question, held on screen while the model works on it.
+private struct PendingExchangeView: View {
+    let question: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DL.Spacing.small) {
+            Text(question)
+                .font(DL.Font.body.weight(.medium))
+                .foregroundStyle(DLColor.primaryText)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .multilineTextAlignment(.trailing)
+            Text("Thinking…")
+                .font(DL.Font.body)
+                .foregroundStyle(DLColor.secondaryText)
+        }
     }
 }
 
