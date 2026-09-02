@@ -9,6 +9,14 @@ import ActivityKit
 /// Distance, duration, one status and at most one thing worth saying. Not a mini
 /// dashboard: on the Lock Screen and in the Dynamic Island the driver is glancing,
 /// and a glance holds three things.
+///
+/// Declaring the `small` activity family is what puts a live drive on the **CarPlay
+/// dashboard**, beside Maps, without the driver opening anything. CarPlay renders
+/// that family the same way the Apple Watch Smart Stack does, so the one small
+/// layout below serves both. This is the mechanism Apple actually gives a
+/// third-party app for dashboard content - `CPDashboardController` is not it - and
+/// it is why the layout branches on `activityFamily` rather than assuming the Lock
+/// Screen's space. See docs/CARPLAY.md.
 struct DriveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         #if canImport(ActivityKit)
@@ -53,6 +61,7 @@ struct DriveActivityWidget: Widget {
             }
             .widgetURL(DeepLink.drive.url)
         }
+        .supplementalActivityFamilies([.small])
         #else
         StaticConfiguration(kind: "DriveLayerDriveActivity", provider: SnapshotProvider()) { _ in
             EmptyView()
@@ -63,9 +72,20 @@ struct DriveActivityWidget: Widget {
 
 #if canImport(ActivityKit)
 private struct LockScreenDriveView: View {
+    /// `small` is the CarPlay dashboard and the Watch Smart Stack; anything else is
+    /// the Lock Screen, which has room for the fuller layout.
+    @Environment(\.activityFamily) private var activityFamily
     let context: ActivityViewContext<DriveActivityAttributes>
 
     var body: some View {
+        if activityFamily == .small {
+            SmallDriveView(context: context)
+        } else {
+            lockScreenBody
+        }
+    }
+
+    private var lockScreenBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(context.attributes.vehicleName, systemImage: "steeringwheel")
@@ -109,6 +129,39 @@ private struct LockScreenDriveView: View {
             }
         }
         .padding()
+    }
+}
+
+/// The drive at dashboard scale: on CarPlay this sits beside Maps, and on the Watch
+/// in the Smart Stack. Three things, because that is what a glance at speed holds -
+/// distance leads because it is the number that is actually changing, and the
+/// headline replaces the plain status only when there is something worth saying.
+private struct SmallDriveView: View {
+    let context: ActivityViewContext<DriveActivityAttributes>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "steeringwheel")
+                Text(context.attributes.vehicleName)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: context.state.vehicleStatus.symbolName)
+            }
+            .font(.caption2.weight(.semibold))
+
+            Text(String(format: "%.1f km", context.state.distanceKm))
+                .font(.system(.title2, design: .rounded).weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(context.state.headline ?? "\(Int(context.state.durationSeconds / 60)) min")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
     }
 }
 #endif
