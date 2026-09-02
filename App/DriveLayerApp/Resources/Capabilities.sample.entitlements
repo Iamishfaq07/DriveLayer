@@ -7,8 +7,9 @@
   not been granted breaks code signing, so DriveLayer ships without them and works
   without them. Merge the keys you have been granted into DriveLayer.entitlements.
 
-  - CarPlay driving task: requested at https://developer.apple.com/carplay/
-    Also add the CarPlay scene role to Info.plist (see docs/CARPLAY.md).
+  - CarPlay driving task: granted, and already merged into DriveLayer.entitlements
+    along with the CarPlay scene role in Info.plist (see docs/CARPLAY.md). Kept here
+    too so this file still shows every gated entitlement in one place.
   - WeatherKit: enabled on a paid developer account, and then set DLWeatherKitEnabled
     to true in Info.plist so the app stops reporting weather as unconfigured.
 -->

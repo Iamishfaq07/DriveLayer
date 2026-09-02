@@ -119,8 +119,29 @@
 		<string>bluetooth-central</string>
 	</array>
 
-	<!-- CarPlay: the scene role below is deliberately absent until Apple grants the
-	     driving-task entitlement. The CarPlay code ships and compiles; enabling it is
-	     two documented steps in docs/CARPLAY.md. -->
+	<!-- CarPlay: Apple granted the driving-task entitlement, so the scene role is
+	     declared. No UIWindowSceneSessionRoleApplication entry is needed alongside
+	     it - SwiftUI's App protocol configures the phone's own window scene without
+	     one, and adding an unnecessary manual entry is how that default gets
+	     silently overridden. See docs/CARPLAY.md. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>DriveLayer CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>
