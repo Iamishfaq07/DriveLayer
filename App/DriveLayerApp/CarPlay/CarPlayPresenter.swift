@@ -11,13 +11,19 @@ import CarPlay
 /// formats, orders by urgency, and does no analysis of its own. Refreshes are on a
 /// slow timer because a driver does not need a screen that changes every second.
 ///
-/// The root is a tab bar over two grids and a list, not one scrolling list. A grid
+/// The root is a tab bar over three grids and a list, not one scrolling list. A grid
 /// tile shows a value at a glance - the thing a dashboard is for - and tapping it
 /// pushes the same interpreted sentence the old single list showed as detail text.
 /// This is the ceiling CarPlay allows a driving-task app: `CPGridTemplate`,
-/// `CPListTemplate`, `CPInformationTemplate` and `CPTabBarTemplate` are the whole
-/// vocabulary. There is no custom canvas, no chart, and no template that draws
-/// anything DriveLayer did not already have the data for.
+/// `CPListTemplate`, `CPInformationTemplate`, `CPAlertTemplate` and `CPTabBarTemplate`
+/// are the whole vocabulary. There is no custom canvas, no chart, and no template
+/// that draws anything DriveLayer did not already have the data for.
+///
+/// One template is presented rather than pushed: the critical alert. CarPlay caps a
+/// tab's navigation stack at two templates (the tab's own root, plus one push), which
+/// every grid-to-detail tap here already uses. `CPAlertTemplate` does not count
+/// against that stack - it is shown modally on top of whatever is visible - which is
+/// the only reason there is room for it at all.
 @MainActor
 final class CarPlayPresenter {
 
@@ -25,8 +31,17 @@ final class CarPlayPresenter {
     private var refreshTimer: Timer?
 
     private let vehicleGrid = CPGridTemplate(title: "Vehicle", gridButtons: [])
+    private let tripGrid = CPGridTemplate(title: "Trip", gridButtons: [])
     private let aheadGrid = CPGridTemplate(title: "Ahead", gridButtons: [])
     private let copilotList = CPListTemplate(title: "Ask Harrier", sections: [])
+
+    /// The one critical insight already popped as an alert, so a condition that
+    /// persists across refreshes does not interrupt again every ten seconds - only a
+    /// genuinely new critical insight does. `.watch` and `.attention` never alert;
+    /// they stay on the passive urgent tile, which is the only place a driver has to
+    /// go looking for them.
+    private var alertedInsightID: String?
+    private var isAlertPresented = false
 
     /// CarPlay connects on its own scene, so it needs a reference to the running app's
     /// state. This is the one place a shared instance is justified.
@@ -40,6 +55,9 @@ final class CarPlayPresenter {
         vehicleGrid.tabTitle = "Vehicle"
         vehicleGrid.tabImage = UIImage(systemName: "car.fill")
 
+        tripGrid.tabTitle = "Trip"
+        tripGrid.tabImage = UIImage(systemName: "speedometer")
+
         aheadGrid.tabTitle = "Ahead"
         aheadGrid.tabImage = UIImage(systemName: "binoculars.fill")
 
@@ -48,7 +66,7 @@ final class CarPlayPresenter {
         copilotList.emptyViewTitleVariants = ["DriveLayer"]
         copilotList.emptyViewSubtitleVariants = ["Open DriveLayer on your iPhone to add a vehicle."]
 
-        let tabs = CPTabBarTemplate(templates: [vehicleGrid, aheadGrid, copilotList])
+        let tabs = CPTabBarTemplate(templates: [vehicleGrid, tripGrid, aheadGrid, copilotList])
         interfaceController.setRootTemplate(tabs, animated: false, completion: nil)
 
         refresh()
@@ -70,20 +88,22 @@ final class CarPlayPresenter {
             let placeholder = [CPGridButton(titleVariants: ["Open DriveLayer"],
                                             image: tileImage(symbolName: "iphone", status: nil)) { _ in }]
             vehicleGrid.updateGridButtons(atLeastTwo(placeholder))
+            tripGrid.updateGridButtons(atLeastTwo(placeholder))
             aheadGrid.updateGridButtons(atLeastTwo(placeholder))
             copilotList.updateSections([])
             return
         }
         vehicleGrid.updateGridButtons(atLeastTwo(vehicleButtons(environment)))
+        tripGrid.updateGridButtons(atLeastTwo(tripButtons(environment)))
         aheadGrid.updateGridButtons(atLeastTwo(aheadButtons(environment)))
         copilotList.updateSections([copilotSection()])
+        presentCriticalAlertIfNeeded(environment)
     }
 
     // MARK: - Vehicle tab
 
     private func vehicleButtons(_ environment: AppEnvironment) -> [CPGridButton] {
         let drive = environment.drive
-        let formatter = environment.formatter
         var buttons: [CPGridButton] = []
 
         // Urgent first: if something needs attention, it leads, and its shape encodes
@@ -104,6 +124,38 @@ final class CarPlayPresenter {
                                      lines: [health.map { "\($0.overall.label) — \($0.headline)" } ?? "Not enough data yet."])
         })
 
+        // Same battery reading the health screen and "How's the battery" already use -
+        // this is not a new judgment, just a new place to glance at the existing one.
+        if let battery = health?.system(.battery), battery.status != .unknown {
+            buttons.append(CPGridButton(titleVariants: [battery.headline],
+                                        image: tileImage(symbolName: InsightCategory.battery.symbolName,
+                                                         status: battery.status)) { [weak self] _ in
+                self?.presentInformation(title: "Battery", lines: [battery.headline, battery.detail].compactMap { $0 })
+            })
+        }
+
+        if !drive.hyperion.isSilent {
+            let hyperion = drive.hyperion
+            buttons.append(CPGridButton(titleVariants: [hyperion.overall.label],
+                                        image: tileImage(symbolName: "engine.combustion.fill",
+                                                         status: hyperion.overall)) { [weak self] _ in
+                self?.presentInformation(title: "Hyperion", lines: [hyperion.overall.label])
+            })
+        }
+
+        return buttons
+    }
+
+    // MARK: - Trip tab
+
+    /// Range, the last completed drive, and what's next for service - "how far can I
+    /// go, how did the last drive go, what does the car need" - kept apart from the
+    /// Vehicle tab's "how is it doing right now" so neither grid grows past a glance.
+    private func tripButtons(_ environment: AppEnvironment) -> [CPGridButton] {
+        let drive = environment.drive
+        let formatter = environment.formatter
+        var buttons: [CPGridButton] = []
+
         let rangeKm = drive.fuelStatus.estimatedRangeKm.value
         let rangeText = formatter.distance(kilometres: rangeKm, fractionDigits: 0)
         let fuelSeverity = severity(forCategory: .fuel, in: drive.insights)
@@ -114,15 +166,26 @@ final class CarPlayPresenter {
                                      lines: [rangeText.map { "~\($0) \(formatter.distanceUnitLabel) estimated" } ?? "Not available yet."])
         })
 
-        // Replaces a diesel tile that could never appear on this car: DieselGuardian
-        // returns notApplicable for a petrol profile, so the condition was dead for the
-        // only vehicle DriveLayer supports.
-        if !drive.hyperion.isSilent {
-            let hyperion = drive.hyperion
-            buttons.append(CPGridButton(titleVariants: [hyperion.overall.label],
-                                        image: tileImage(symbolName: "engine.combustion.fill",
-                                                         status: hyperion.overall)) { [weak self] _ in
-                self?.presentInformation(title: "Hyperion", lines: [hyperion.overall.label])
+        // The same snapshot the widgets and Siri read - written once per analysis
+        // pass, not recomputed here, so this tile can never disagree with them.
+        if let snapshot = WidgetSnapshotStore.read(), let distanceKm = snapshot.lastTripDistanceKm {
+            let distanceText = formatter.distance(kilometres: distanceKm, fractionDigits: 1) ?? "—"
+            let detail = [formatter.duration(seconds: snapshot.lastTripDurationSeconds),
+                          formatter.economy(kmPerLitre: snapshot.lastTripEconomyKmPerLitre).map { "\($0) \(formatter.economyUnitLabel)" }]
+                .compactMap { $0 }.joined(separator: " · ")
+            buttons.append(CPGridButton(titleVariants: ["\(distanceText) \(formatter.distanceUnitLabel)"],
+                                        image: tileImage(symbolName: InsightCategory.trip.symbolName, status: nil)) { [weak self] _ in
+                let line = detail.isEmpty ? "\(distanceText) \(formatter.distanceUnitLabel)"
+                                          : "\(distanceText) \(formatter.distanceUnitLabel) · \(detail)"
+                self?.presentInformation(title: "Last drive", lines: [line])
+            })
+        }
+
+        if let maintenance = drive.health?.system(.maintenance), maintenance.status != .unknown {
+            buttons.append(CPGridButton(titleVariants: [maintenance.headline],
+                                        image: tileImage(symbolName: InsightCategory.maintenance.symbolName,
+                                                         status: maintenance.status)) { [weak self] _ in
+                self?.presentInformation(title: "Next service", lines: [maintenance.headline])
             })
         }
 
@@ -176,11 +239,11 @@ final class CarPlayPresenter {
 
     // MARK: - Ask Harrier
 
-    /// A short list of questions rather than free-form voice: the answers are already
-    /// computed, and picking from four is safer at speed than dictating a sentence.
+    /// All of the copilot's example questions, not a shortened preview of them - each
+    /// one already routes to a real, non-stub answer, the same ones the phone app's
+    /// copilot gives. A list scrolls; there was never a reason to cut it down to four.
     private func copilotSection() -> CPListSection {
-        let questions = Array(LocalCopilot.exampleQuestions.prefix(4))
-        let items = questions.map { question -> CPListItem in
+        let items = LocalCopilot.exampleQuestions.map { question -> CPListItem in
             let item = CPListItem(text: question, detailText: nil)
             item.handler = { [weak self] _, completion in
                 self?.answer(question)
@@ -197,6 +260,31 @@ final class CarPlayPresenter {
         let answer = LocalCopilot.respond(to: question, snapshot: snapshot)
         // The spoken form, not the detailed one: this is being read at the wheel.
         presentInformation(title: question, lines: [answer.spokenText])
+    }
+
+    // MARK: - Critical alert
+
+    /// Interrupts with a modal alert for a genuinely critical insight, once per
+    /// distinct insight. Everything below `.critical` stays passive on the urgent
+    /// tile - a colour and a shape a driver can check when they choose to, not a
+    /// pop-up they did not ask for. This is deliberately conservative: CarPlay review
+    /// treats driver interruptions as a safety question, not a feature to reach for.
+    private func presentCriticalAlertIfNeeded(_ environment: AppEnvironment) {
+        guard !isAlertPresented,
+              let insight = InsightEngine.headline(environment.drive.insights),
+              insight.severity == .critical,
+              insight.id != alertedInsightID else { return }
+
+        alertedInsightID = insight.id
+        isAlertPresented = true
+        let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
+            self?.isAlertPresented = false
+        }
+        // Two variants, longest first: CarPlay picks whichever fits the screen it's
+        // presenting on, and the short form still says what matters on its own.
+        let alert = CPAlertTemplate(titleVariants: ["\(insight.title) — \(insight.summary)", insight.title],
+                                    actions: [dismiss])
+        interfaceController.presentTemplate(alert, animated: true, completion: nil)
     }
 
     // MARK: - Shared

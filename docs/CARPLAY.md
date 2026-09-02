@@ -6,7 +6,7 @@ CarPlay is a separate product surface, not a mirrored iPhone screen. The phone a
 can afford a scrolling screen of interpreted context; CarPlay gets a handful of
 tiles, glanceable at a red light, and a short list of questions.
 
-The root is a tab bar over three screens:
+The root is a tab bar over four screens:
 
 **Vehicle** (grid) — up to four tiles, in this order when present:
 
@@ -14,15 +14,27 @@ The root is a tab bar over three screens:
    carries severity rather than topic, since that is the one thing worth reading
    without colour on this particular tile.
 2. **Vehicle** — overall health status.
-3. **Range** — estimated distance remaining, labelled as such.
+3. **Battery** — the same voltage judgment the health screen and "How's the
+   battery?" already give, not a new one.
 4. **Hyperion** — engine assessment status, when there is anything assessed yet.
+
+**Trip** (grid) — up to three tiles, kept apart from Vehicle so neither grid grows
+past a glance:
+
+1. **Range** — estimated distance remaining, labelled as such.
+2. **Last drive** — distance, duration and economy from the most recently completed
+   trip, read from the same snapshot the widgets and Siri already use.
+3. **Next service** — what's due and when, from the same maintenance status the
+   health screen shows.
 
 **Ahead** (grid) — up to two tiles:
 
 1. **Weather** — the next meaningful change on the route, or current conditions.
 2. **Terrain** — the climb or descent underway or coming up.
 
-**Ask Harrier** (list) — four questions whose answers are already computed.
+**Ask Harrier** (list) — all of the copilot's example questions, each already
+routing to a real answer rather than a stub. Nothing here is shortened for space;
+a list scrolls.
 
 Tapping any tile or question pushes an information template with the fuller
 sentence — the *spoken* form for a copilot answer, since it is being read at the
@@ -30,27 +42,49 @@ wheel. A grid tile shows the value at a glance; the push is where the explanatio
 lives, matching how the phone app and the widgets already separate "what" from
 "why."
 
+**One exception to "tap to see more": a genuinely critical insight interrupts.**
+`.watch` and `.attention` stay passive on the urgent tile, same as always. Only
+`.critical` pops a modal `CPAlertTemplate` — once per distinct insight, not once
+per ten-second refresh — because CarPlay review treats driver interruptions as a
+safety question, not a feature to reach for. Dismissing it does not clear the
+underlying tile; it just stops interrupting about the same thing twice.
+
 What CarPlay deliberately does not have: charts, scrolling telemetry, trip history,
 settings, or any interaction that needs more than a glance. Refresh is on a
 ten-second timer: frequent enough for status, slow enough to be ignorable.
 
 **On graphics:** a grid of tinted icon tiles is the ceiling, not a design choice
-short of one. `CPGridTemplate`, `CPListTemplate`, `CPInformationTemplate` and
-`CPTabBarTemplate` are the entire vocabulary Apple gives a driving-task app — no
-custom view, no chart, no gauge, no canvas. `CPMapTemplate`, the one CarPlay
-template that allows genuinely custom drawing, is restricted to the Navigation
-category, which DriveLayer is not and should not misrepresent itself as. A vehicle
-manufacturer's own cluster (Tesla, BMW, and similar) is not a CarPlay app at all —
-it is the car's own embedded software, unconstrained by any of this, which is why
-it can look nothing like what a third-party app is permitted to show.
+short of one. `CPGridTemplate`, `CPListTemplate`, `CPInformationTemplate`,
+`CPAlertTemplate` and `CPTabBarTemplate` are the entire vocabulary Apple gives a
+driving-task app — no custom view, no chart, no gauge, no canvas. `CPMapTemplate`,
+the one CarPlay template that allows genuinely custom drawing, is restricted to the
+Navigation category, which DriveLayer is not and should not misrepresent itself as.
+A vehicle manufacturer's own cluster (Tesla, BMW, and similar) is not a CarPlay app
+at all — it is the car's own embedded software, unconstrained by any of this, which
+is why it can look nothing like what a third-party app is permitted to show.
+
+**On the CarPlay Dashboard:** the shortcut-button surface next to Maps and Now
+Playing (`CPDashboardController`) is a separate, second scene from the app's own
+CarPlay screen, and it is not built here. Apple's own documentation confirms it for
+navigation and audio apps; nothing found while researching this confirms whether a
+driving-task app can participate at all, and this project does not ship API calls
+it has not verified against a real declaration. Worth revisiting if that gets
+confirmed one way or the other — not before.
+
+**On CarPlay's navigation depth:** a driving-task app's tab stack is capped at two
+templates deep — a tab's own root, plus one push — which every grid tile here
+already uses when it pushes an information template. `CPAlertTemplate` does not
+draw against that budget, because it is presented modally rather than pushed; that
+is the only reason there was room to add it without restructuring anything else.
 
 ## Templates used
 
-`CPGridTemplate` for the two tile screens, `CPListTemplate` for Ask Harrier and for
-the root's implicit empty state, `CPInformationTemplate` for a pushed answer or
-insight detail, `CPTabBarTemplate` to hold the three of them together. All four are
-within what a driving-task app may present. No custom UI, no unsupported template,
-and nothing that assumes a category DriveLayer has not been granted.
+`CPGridTemplate` for the tile screens, `CPListTemplate` for Ask Harrier and for the
+root's implicit empty state, `CPInformationTemplate` for a pushed answer or insight
+detail, `CPAlertTemplate` for the one interruption CarPlay allows, `CPTabBarTemplate`
+to hold them all together. All are within what a driving-task app may present. No
+custom UI, no unsupported template, and nothing that assumes a category DriveLayer
+has not been granted.
 
 Tile colour reuses the same `SemanticStatus` → `Palette.status` vocabulary as the
 phone app and the widgets, so a colour never means something different on CarPlay
