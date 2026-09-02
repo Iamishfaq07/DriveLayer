@@ -72,13 +72,26 @@ targets:
         INFOPLIST_FILE: App/DriveLayerApp/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/DriveLayerApp/Resources/DriveLayer.entitlements
         GENERATE_INFOPLIST_FILE: NO
-        # Left unset, XcodeGen omits ProvisioningStyle from the pbxproj entirely,
-        # which Xcode treats as manual signing with a development identity - even
-        # for a Release archive, and even with -allowProvisioningUpdates. That sent
-        # the TestFlight workflow looking for an "iOS Development" certificate while
-        # holding a correctly-verified Apple Distribution one. Automatic signing is
-        # what lets xcodebuild pick the right identity for the action it is running.
+        # Automatic for local, IDE-driven Debug builds: a contributor's own Apple
+        # ID picks a development identity without anyone having to think about it.
         CODE_SIGN_STYLE: Automatic
+      configs:
+        Release:
+          # A real TestFlight run proved Automatic does not extend to a Release
+          # archive run from the command line: it resolves to a development
+          # identity regardless of -configuration, and naming a distribution
+          # identity while still Automatic is a hard conflict, not a hint - Xcode
+          # said so outright ("switch to manual signing"). Manual is that switch,
+          # scoped to Release so local Debug development is untouched.
+          #
+          # PROVISIONING_PROFILE_SPECIFIER is a name, not a lookup: it does not
+          # need to exist yet. -allowProvisioningUpdates in the release workflow
+          # creates a profile under this exact name if none matches, and reuses
+          # it on every later run.
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "DriveLayer App Store"
+
     dependencies:
       - target: DriveLayerWidgets
         embed: true
@@ -107,6 +120,15 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
         CODE_SIGN_STYLE: Automatic
+      configs:
+        Release:
+          # See the DriveLayer target above for why Release overrides Automatic.
+          # A distinct specifier because a distinct bundle ID needs its own
+          # profile - one specifier for both targets would leave this one without
+          # a match.
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "DriveLayer Widgets App Store"
 
   DriveLayerCoreTests:
     type: bundle.unit-test
