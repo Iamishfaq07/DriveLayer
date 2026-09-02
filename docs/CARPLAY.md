@@ -63,13 +63,39 @@ A vehicle manufacturer's own cluster (Tesla, BMW, and similar) is not a CarPlay 
 at all — it is the car's own embedded software, unconstrained by any of this, which
 is why it can look nothing like what a third-party app is permitted to show.
 
-**On the CarPlay Dashboard:** the shortcut-button surface next to Maps and Now
-Playing (`CPDashboardController`) is a separate, second scene from the app's own
-CarPlay screen, and it is not built here. Apple's own documentation confirms it for
-navigation and audio apps; nothing found while researching this confirms whether a
-driving-task app can participate at all, and this project does not ship API calls
-it has not verified against a real declaration. Worth revisiting if that gets
-confirmed one way or the other — not before.
+## The CarPlay Dashboard
+
+The dashboard — the screen beside Maps — is a separate surface from the app's own
+CarPlay templates, and DriveLayer reaches it **without the CarPlay framework at
+all**. An earlier version of this document said the dashboard was unavailable
+because `CPDashboardController` could not be confirmed for a driving-task app. That
+was the wrong API to have been asking about: Apple's mechanism for third-party
+dashboard content is WidgetKit and ActivityKit.
+
+**Live Activity.** CarPlay renders a Live Activity using the `small` activity
+family — the same size class the Apple Watch Smart Stack uses — so
+`DriveActivityWidget` declares `.supplementalActivityFamilies([.small])` and
+branches on `activityFamily` to draw a dashboard-scale layout. Nothing else was
+needed: the drive Live Activity was already started, updated and ended by
+`DriveSessionCoordinator`, so a drive in progress now appears on the dashboard on
+its own, and the same small layout serves a future Watch app for free.
+
+**Widgets.** A widget that supports `.systemSmall` is eligible for the CarPlay
+dashboard automatically — it is opt-out (`.disfavoredLocations([.carPlay], for:)`),
+not opt-in — and all four of DriveLayer's widgets already did. CarPlay draws them
+StandBy-style: full colour, with the widget container background removed. Every
+widget here already uses `.containerBackground(for: .widget)`, which is precisely
+the modifier that lets the system take the background away, so they degrade
+correctly rather than rendering a card that CarPlay has stripped the back off.
+
+One constraint worth knowing before designing for this: there is currently **no API
+to detect whether a widget is drawing in CarPlay or on the phone**. An Apple
+engineer confirmed as much on the developer forums and pointed at an enhancement
+request. So one layout has to work in both places; a CarPlay-specific widget design
+is not on the table today.
+
+Both surfaces need iOS 26 on the phone to appear on the dashboard. The `small`
+activity family itself is iOS 18, which is why the deployment target is 18.0.
 
 **On CarPlay's navigation depth:** a driving-task app's tab stack is capped at two
 templates deep — a tab's own root, plus one push — which every grid tile here
