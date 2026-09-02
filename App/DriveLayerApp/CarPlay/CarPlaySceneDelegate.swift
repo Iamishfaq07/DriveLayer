@@ -6,10 +6,10 @@ import CarPlay
 
 /// CarPlay entry point.
 ///
-/// CarPlay is a separate product surface, not a mirror of the phone. It shows four
-/// things — vehicle status, range, what's ahead, and the one insight that matters —
-/// and offers a short list of questions whose answers are already computed. No
-/// charts, no scrolling telemetry, no interaction that needs more than a glance.
+/// CarPlay is a separate product surface, not a mirror of the phone. It shows a
+/// tab bar over two glanceable tile screens — Vehicle and Ahead — plus a short list
+/// of questions whose answers are already computed. No charts, no scrolling
+/// telemetry, no interaction that needs more than a glance.
 ///
 /// The templates used here are the ones a driving-task app may present. Everything
 /// CarPlay-specific lives in this folder; nothing else in the app depends on it, so
