@@ -146,12 +146,14 @@ driving — rather than a card every few kilometres.
 One large number, four supporting ones, at most three pieces of context, and a
 telemetry sheet one level down.
 
-## Phase 13 — CarPlay · **Done (code), gated (entitlement)**
+## Phase 13 — CarPlay · **Done, and no longer gated**
 
-Root list with urgency-ordered status and four pre-computed questions, using
-driving-task-appropriate templates. Isolated so the app builds and runs identically
-without the entitlement. Enabling it is two documented steps — see
-[CARPLAY.md](CARPLAY.md).
+Apple granted the driving-task entitlement. What shipped since is well past the
+"root list with four questions" this section originally described: a tab bar over
+Vehicle, Trip and Ahead tile grids plus the full question list, a modal alert for a
+critical insight, spoken questions on iOS 27, and the live drive on the CarPlay
+dashboard. See [CARPLAY.md](CARPLAY.md), which also states the template ceiling
+plainly so the next person does not have to rediscover it.
 
 ## Phase 14 — Widgets and Live Activities · **Done**
 
@@ -159,12 +161,21 @@ Four widgets plus a Live Activity, reading a snapshot published to a shared app 
 so widgets render rather than reason. Timeline reloads only on meaningful change;
 Live Activity updates throttled to twenty seconds.
 
+Both now reach the CarPlay dashboard as well as the phone — the widgets without a
+line of change, the Live Activity through the `small` activity family. See Phase 17.
+
 ## Phase 15 — Copilot · **Done**
 
 On-device deterministic intent matcher over a summarised snapshot that by
 construction excludes raw telemetry, routes, coordinates, VIN and registration. Every
 sentence badged fact / estimate / inference / general information. Siri support
 through three App Intents.
+
+That matcher is now the *fallback* rather than the whole copilot: Apple's on-device
+model answers first where it is available, bounded by the same snapshot and checked
+before anything reaches a driver. See Phase 17. It remains the only copilot on a
+phone without Apple Intelligence, and it still answers every tapped question in
+CarPlay, where instant and exact beats fluent.
 
 ## Phase 16 — Testing, polish, performance, privacy · **Partially done**
 
@@ -187,7 +198,7 @@ Honest list of what is scaffolding rather than working software.
 | **Compilation** | Green in CI: core, tests, app and widget extension all compile. |
 | **Test execution** | 534 tests passing in CI at `982cd52`: 494 via `swift test`, 40 in the app target. |
 | **Device run** | Not performed. Needs hardware — sensors, a real adapter, a real car. |
-| **CarPlay** | Code complete; needs Apple's entitlement plus two documented edits. |
+| **CarPlay** | Live. Apple granted the driving-task entitlement, the scene role and entitlement are merged, and TestFlight builds carry it. Rendering on a real head unit is still unverified from CI — Xcode's CarPlay Simulator (Device Hub) is the way to check it without a car. |
 | **WeatherKit** | Implemented; needs a paid capability, and reports "not configured" until then. |
 | **Elevation provider** | Protocol plus an honest mock. No real elevation source is bundled, so terrain-ahead is only live with a provider configured. |
 | **Route weather** | Working end to end. A driver sets a destination in Drive Mode, MapKit supplies the road, and the forecast is read at 10 km intervals for the hour the driver is expected at each. Needs WeatherKit configured to return anything. |
@@ -306,11 +317,50 @@ structured type — so they are removed rather than left to look outstanding.
 
 ## V2
 
-Richer CarPlay once the entitlement lands · route weather driven by a destination ·
-a model-backed copilot behind `CopilotProviding` · road hazard reporting · surfacing
+Three items are struck from this list because they shipped, and are recorded below
+rather than quietly deleted — a roadmap that only ever grows is not being read.
+
+- ~~Richer CarPlay once the entitlement lands~~ — **done.** Apple granted the
+  driving-task entitlement; CarPlay is now a tab bar over three tile grids and a
+  question list, with a modal alert for a critical insight.
+- ~~A model-backed copilot behind `CopilotProviding`~~ — **done.** Apple's on-device
+  Foundation Models, bounded by `CopilotFactSheet` and checked by `AnswerGuard`.
+- ~~CarPlay dashboard presence~~ — **done**, and not by the route this file would have
+  guessed: the dashboard is WidgetKit and ActivityKit, not `CPDashboardController`.
+
+Still V2: route weather driven by a destination · road hazard reporting · surfacing
 impact events · sharper fuel intelligence using terrain · Apple Watch · deeper
 maintenance · anomaly detection beyond thresholds · validated Harrier-specific PIDs
 if and when they can be verified.
+
+The Watch item is now cheaper than it looks: the Live Activity's `small` family
+layout, added for the CarPlay dashboard, is the same size class the Watch Smart Stack
+uses, so that part already exists.
+
+## Phase 17 — iOS 26/27 surfaces · **Done**
+
+Built after a deliberate pass over what the current OS actually offers, rather than
+from memory. Each needed verifying before it could be written, and two of them
+corrected a belief this repository had already committed to paper.
+
+| Surface | What landed |
+|---|---|
+| CarPlay dashboard | The live drive appears beside Maps via the `small` activity family. The four widgets needed no change: `.systemSmall` support already made them eligible, and each already used `.containerBackground(for:)`, which is what lets CarPlay strip the background cleanly. |
+| On-device copilot | `FoundationModelsCopilot` asks Apple's system model and discards any answer containing a number it was not given. Fails closed to `LocalCopilot`. |
+| Voice in CarPlay | `CPVoiceControlTemplate` opened to driving-task apps in iOS 27. On-device speech recognition only, with no server fallback. |
+
+Two corrections worth keeping, because both were stated confidently and both were
+wrong:
+
+- `docs/CARPLAY.md` said the dashboard was unreachable because `CPDashboardController`
+  could not be confirmed for this category. The API was real and the reasoning was
+  sound; it was simply the wrong API to have been asking about.
+- `docs/PRIVACY.md` said the copilot "does not call a model." True when written, false
+  the moment Foundation Models landed, and updated rather than left to drift.
+
+Deployment target moved 17.0 → 18.0 for the `small` activity family. The dashboard
+surfaces themselves need iOS 26 on the phone, and voice needs iOS 27, so each is
+gated at its own version rather than by raising the floor further.
 
 ## V3
 
