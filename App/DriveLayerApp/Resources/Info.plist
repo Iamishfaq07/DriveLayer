@@ -101,6 +101,10 @@
 	<string>DriveLayer connects to a Bluetooth OBD-II adapter to read your vehicle's engine data. It only ever reads — it never sends commands that change anything in your car.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>DriveLayer can scan documents like your insurance or registration into the glovebox. Scans are stored on this device with file protection and are never uploaded.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DriveLayer listens only while you are asking it a question in CarPlay, and only for as long as the listening screen is up. Your speech is recognised on this device and the recording is never uploaded or kept.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition turns your spoken question into words DriveLayer can answer. It runs on this device — if your iPhone cannot recognise speech without sending audio to Apple, DriveLayer will not listen at all.</string>
 
 	<key>NSSupportsLiveActivities</key>
 	<true/>

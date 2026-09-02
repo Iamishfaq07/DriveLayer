@@ -109,9 +109,20 @@ All optional. The app is useful with none of them.
 | Motion | Accurate altitude, so gradient means something; road surface events | GPS altitude only, lower confidence |
 | Bluetooth | Live engine data from an OBD-II adapter | Phone-only intelligence (Level 1) |
 | Camera | Scanning documents into the glovebox | Type document details in |
+| Microphone + speech | Asking a question out loud in CarPlay | Tap a question from the list instead |
 
 Every permission string in `Info.plist` says what the data is used for and that it
 stays on the device.
+
+**The microphone is the newest of these and the easiest to get wrong, so it is worth
+being specific.** DriveLayer listens only while the CarPlay voice screen is up, only
+until it has a sentence or ten seconds pass, and never in the background. Recognition
+uses `requiresOnDeviceRecognition`, and there is deliberately **no server fallback**:
+on a phone that cannot recognise speech locally, DriveLayer refuses to listen and says
+why, rather than sending audio to Apple to be transcribed. Nothing is recorded to
+disk — audio buffers go to the recogniser and are released, and the transcript lives
+only long enough to become a question. Siri, which answers through App Intents, needs
+none of this.
 
 ## What DriveLayer will not do
 

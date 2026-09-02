@@ -187,5 +187,24 @@ number the app itself would not show:
 > "Harrier is healthy. You have roughly 326 kilometres of estimated range. Battery
 > voltage has been trending below your normal baseline."
 
-The in-app copilot list on the CarPlay root is the interaction that works today for
-everyone; free-form voice through `CPVoiceControlTemplate` is a later phase.
+**Free-form voice is no longer a later phase.** `CPVoiceControlTemplate` became
+available to a driving-task app in iOS 27 — before that it was restricted to a few
+categories DriveLayer is not one of — so "Ask a question" now sits at the top of the
+Ask Harrier tab on iOS 27, above the pre-computed list. Speaking is the only entry
+there that can produce a question the list does not already contain.
+
+A spoken question goes to `FoundationModelsCopilot` rather than the rule matcher.
+This is the one place the model earns its latency: a sentence someone actually said
+will rarely match keywords, and the model falls back to the matcher by itself when it
+cannot help. The answer is still checked by `AnswerGuard`, so speaking cannot get a
+number past a check that typing could not.
+
+**On the microphone.** Recognition is on-device and there is no server fallback: if
+the phone cannot recognise speech locally, DriveLayer says so and declines to listen
+rather than quietly uploading audio. CarPlay requires that recording only happen
+while the voice template is on screen, which is also the honest thing to show — the
+template appearing is the driver's evidence that the microphone opened, and it
+disappearing is the evidence that it closed. Listening stops on a final result, after
+ten seconds, or when the car disconnects, whichever comes first.
+
+Siri, above, still works without any of this and without the microphone permission.
