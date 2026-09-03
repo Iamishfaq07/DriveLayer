@@ -179,6 +179,8 @@ struct DriveView: View {
                     .foregroundStyle(DLColor.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            reachabilityLine
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dlCard()
@@ -187,6 +189,28 @@ struct DriveView: View {
                 drive.setDestination(destination)
                 isChoosingDestination = false
             }
+        }
+    }
+
+    /// Whether the tank covers the road ahead.
+    ///
+    /// An EV answers this continuously and a petrol car leaves it to the driver's
+    /// arithmetic at 100 km/h. DriveLayer knows the route length and the estimated
+    /// range, so it can do the subtraction — and says "estimated" every time, because
+    /// a range figure is an inference from economy, not a reading from the tank.
+    @ViewBuilder
+    private var reachabilityLine: some View {
+        if let verdict = drive.journeyReserve, let sentence = drive.journeySentence,
+           verdict != .unknown {
+            HStack(alignment: .top, spacing: DL.Spacing.small) {
+                StatusIndicator(status: verdict.status, showsLabel: false, size: 15)
+                Text(sentence)
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, DL.Spacing.tight)
+            .accessibilityElement(children: .combine)
         }
     }
 

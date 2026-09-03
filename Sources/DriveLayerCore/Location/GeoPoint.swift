@@ -80,6 +80,23 @@ enum Geo {
         return degrees < 0 ? degrees + 360 : degrees
     }
 
+    /// Length of a *drawn route* in metres: plain geometry, summed as given.
+    ///
+    /// Deliberately not `pathDistance`, and the difference matters enough to be worth
+    /// a function of its own. `pathDistance` measures a recorded GPS trace, so it
+    /// discards fixes whose accuracy it cannot vouch for — and a route from MapKit is
+    /// not a trace. Its points are road geometry with no accuracy attached at all,
+    /// which `isUsableForRouting` rejects outright, so `pathDistance` returns exactly
+    /// zero for every route ever handed to it.
+    ///
+    /// Zero would not have failed loudly. It would have fed a zero-kilometre journey
+    /// into the fuel reserve check, which then reports the whole tank as spare and
+    /// tells the driver they can reach anywhere. Hence a separate name, and this note.
+    static func routeLength(_ points: [GeoPoint]) -> Double {
+        guard points.count >= 2 else { return 0 }
+        return zip(points, points.dropFirst()).reduce(0) { $0 + distance(from: $1.0, to: $1.1) }
+    }
+
     /// Total path length in metres, skipping fixes too inaccurate to trust and jumps
     /// that are physically impossible for a road vehicle.
     static func pathDistance(_ points: [GeoPoint], maximumPlausibleSpeedMetresPerSecond: Double = 90) -> Double {
