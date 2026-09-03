@@ -52,7 +52,9 @@ Two capabilities are worth understanding rather than ticking blindly:
   correctly report weather as not configured. Enabling it now costs nothing and
   saves a step later; expecting weather from it will only waste your time.
 
-Do **not** enable CarPlay yet. See §6.
+**Do enable CarPlay** on the App ID, and regenerate the profile afterwards. See §6 —
+this is the step whose omission makes the app invisible in the car while every
+other part of the build stays green.
 
 ## 3. Create the app record
 
@@ -161,18 +163,44 @@ API appears while the declaration still says `false`, because the declaration is
 an export statement and quietly becoming untrue is the failure worth preventing.
 It will need revisiting if optional cloud sync (V3) is ever built.
 
-## 6. CarPlay, honestly
+## 6. CarPlay
 
-**CarPlay will not work in this build**, and adding the entitlement to the
-repository would make signing fail rather than make CarPlay appear.
+Apple has granted the driving-task entitlement, and the repository carries both
+halves it needs: `com.apple.developer.carplay-driving-task` in
+`DriveLayer.entitlements`, and the `CPTemplateApplicationSceneSessionRoleApplication`
+scene role in `Info.plist`. The code behind them ships.
 
-Apple grants the driving-task entitlement by application, at
-<https://developer.apple.com/carplay/>. Once granted, `docs/CARPLAY.md` has the
-two edits — an entitlement key and a scene declaration — and the code behind them
-already compiles.
+**The step that is easy to miss, and the reason an app can be missing from CarPlay
+while everything else looks fine:** the *provisioning profile* has to grant the
+entitlement too, and a profile issued before Apple granted it will not.
 
-Until then: the phone app is fully usable in the car. Mount the phone, connect the
-adapter, and Drive Mode does what CarPlay would, on the screen you have.
+1. In the Developer portal, open the App ID `com.drivelayer.app` and enable the
+   **CarPlay** capability. The grant from Apple does not switch it on for you.
+2. **Regenerate** the App Store provisioning profile. An existing profile is not
+   updated in place; it has to be reissued after the capability is on.
+3. Re-encode the new profile and replace `BUILD_PROVISION_PROFILE_BASE64`.
+
+Skipping any of these does not fail the build. Export re-signs the app against the
+profile, so an entitlement the profile lacks is *dropped* rather than refused: the
+archive succeeds, TestFlight accepts the build, the app installs and runs, and
+CarPlay simply never lists it, with nothing anywhere saying why.
+
+The release workflow now refuses to ship that build. It checks the profile grants
+CarPlay before archiving, and — because the profile and the signed binary can still
+disagree — unzips the exported IPA and asks the binary directly what it was signed
+with, plus whether the CarPlay scene role survived into its `Info.plist`. Either
+check failing stops the run before upload and prints the fix above.
+
+### If the app is still not in CarPlay after a green build
+
+With the workflow checks passing, the build is entitled and declares the scene, so
+what remains is on the phone or the head unit:
+
+- Install the newest TestFlight build. An older one on the phone will not have it.
+- Open **Settings → General → CarPlay → your car → Customise**, and check DriveLayer
+  is in the visible list rather than the hidden one below it.
+- Reconnect the phone, or restart it. The CarPlay app list is cached per car and
+  does not always notice a newly installed app until the connection is remade.
 
 ## 7. What to expect on the first real drive
 
