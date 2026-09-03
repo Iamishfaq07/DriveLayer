@@ -237,6 +237,30 @@ jobs:
           install_profile "$APP_PROFILE"    BUILD_PROVISION_PROFILE_BASE64        com.drivelayer.app         app_profile_name
           install_profile "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 com.drivelayer.app.widgets widget_profile_name
 
+          # The app profile must actually grant CarPlay, and this is checked because
+          # the failure it catches is silent. Export re-signs against the profile, so
+          # an entitlement the profile does not carry is dropped rather than refused:
+          # the build goes green, TestFlight accepts it, the app installs, and CarPlay
+          # simply never lists it. Nothing anywhere says why. A profile issued before
+          # Apple granted the entitlement looks completely normal to every other check
+          # in this job - right bundle ID, right name, valid dates.
+          app_plist="$RUNNER_TEMP/app_profile_check.plist"
+          printf '%s' "$APP_PROFILE" | base64 --decode > "$RUNNER_TEMP/app_check.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/app_check.mobileprovision" > "$app_plist"
+          if /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.carplay-driving-task' \
+               "$app_plist" >/dev/null 2>&1; then
+            echo "App profile grants com.apple.developer.carplay-driving-task."
+          else
+            fail "The app provisioning profile does not grant CarPlay." \
+                 "com.apple.developer.carplay-driving-task is in DriveLayer.entitlements but not in the profile," \
+                 "so export will silently drop it and the app will not appear in CarPlay." \
+                 "Fix: in the Developer portal enable the CarPlay capability on the App ID com.drivelayer.app," \
+                 "regenerate the App Store provisioning profile, then re-encode it into" \
+                 "BUILD_PROVISION_PROFILE_BASE64. A profile made before Apple granted the entitlement" \
+                 "will not have it, and every other check here will still pass."
+          fi
+          rm -f "$app_plist" "$RUNNER_TEMP/app_check.mobileprovision"
+
       - name: Write the App Store Connect API key
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -312,6 +336,50 @@ jobs:
             -archivePath "$RUNNER_TEMP/DriveLayer.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$PLIST"
+
+      # What the profile grants and what the binary ends up carrying are two
+      # different things, and only the second one decides whether CarPlay lists the
+      # app. Export is where they can diverge, so the signed binary is asked
+      # directly rather than inferred from the inputs that went into it.
+      - name: Check the exported app is signed for CarPlay
+        run: |
+          set -euo pipefail
+          IPA="$(find "$RUNNER_TEMP/export" -maxdepth 1 -name '*.ipa' | head -1)"
+          [ -n "$IPA" ] || { echo "::error::No .ipa to inspect."; exit 1; }
+
+          work="$RUNNER_TEMP/ipacheck"
+          rm -rf "$work" && mkdir -p "$work"
+          unzip -q "$IPA" -d "$work"
+          APP="$(find "$work/Payload" -maxdepth 1 -name '*.app' | head -1)"
+          [ -n "$APP" ] || { echo "::error::No .app inside the IPA."; exit 1; }
+
+          entitlements="$work/entitlements.plist"
+          codesign -d --entitlements :- --xml "$APP" > "$entitlements" 2>/dev/null
+
+          echo "Entitlements actually signed into the app:"
+          /usr/libexec/PlistBuddy -c 'Print' "$entitlements" || true
+
+          if /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.carplay-driving-task' \
+               "$entitlements" >/dev/null 2>&1; then
+            echo "The uploaded build is signed for CarPlay."
+          else
+            echo "::error::The exported app is NOT signed for CarPlay."
+            echo "  com.apple.developer.carplay-driving-task survived neither the archive nor the export."
+            echo "  This build would install and run, and CarPlay would never list it."
+            echo "  See the profile check earlier in this job for the usual cause."
+            exit 1
+          fi
+
+          # The scene manifest is the other half: entitled but with no CarPlay scene
+          # declared, the app is still invisible in the car.
+          if /usr/libexec/PlistBuddy \
+               -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:CPTemplateApplicationSceneSessionRoleApplication' \
+               "$APP/Info.plist" >/dev/null 2>&1; then
+            echo "The uploaded build declares a CarPlay scene."
+          else
+            echo "::error::The exported app declares no CarPlay scene role in Info.plist."
+            exit 1
+          fi
 
       - name: Upload to TestFlight
         env:
