@@ -84,6 +84,16 @@ struct DisplayFormatter: Sendable {
         return number(value, fractionDigits: 0)
     }
 
+    /// A plain localised number, for values that carry no unit DriveLayer knows.
+    ///
+    /// Money is the case this exists for: fuel entries record an amount, and the app
+    /// never asks which currency it is in, so it is shown as the number the driver
+    /// typed rather than decorated with a symbol that might be wrong.
+    func decimal(_ value: Double?, fractionDigits: Int = 0) -> String? {
+        guard let value else { return nil }
+        return number(value, fractionDigits: fractionDigits)
+    }
+
     func rpm(_ value: Double?) -> String? {
         guard let value else { return nil }
         return number(value, fractionDigits: 0)
