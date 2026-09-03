@@ -58,8 +58,29 @@ Enforced through `PrivacyLog`, which is the only logging entry point:
 
 ## What is sent off the device
 
-**Weather, and only weather.** When enabled, DriveLayer asks Apple's WeatherKit for
-conditions at a location. That is the only outbound request the app makes.
+**Apple's map and weather services, and nothing else.** This section used to say
+"weather, and only weather... the only outbound request the app makes." That was
+already wrong when written: routing and destination search go to Apple too. Corrected
+rather than left standing, because an understated privacy claim is worse than none.
+
+The complete list of what leaves the device, all of it to Apple:
+
+| What | When | What Apple sees |
+|---|---|---|
+| WeatherKit | Weather is enabled | A location to forecast for |
+| `MKLocalSearch` | You search for a destination | What you typed |
+| `MKDirections` | You set a destination | Start and end of the route |
+| Map tiles | You tap "Show on map" on a drive | The area being drawn |
+
+All four are Apple services covered by Apple's own privacy terms; none of them is
+DriveLayer sending your data to DriveLayer, because there is no DriveLayer server to
+send it to. **No telemetry, trip history, engine data, or vehicle identity is ever
+uploaded anywhere.** That part was true, is still true, and is what the "no upload
+path" claim below means.
+
+Route maps are **off by default** for this reason. A drive's route is drawn as a
+shape — recognisable to you, meaningless to someone glancing at your phone, and
+requiring no network — until you ask for the map.
 
 **The copilot does not change that, and it now uses a language model.** DriveLayer
 asks Apple's on-device system model (Foundation Models) through

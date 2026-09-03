@@ -330,6 +330,7 @@ SFSpeechRecognizer SFSpeechAudioBufferRecognitionRequest SFSpeechRecognitionTask
 SFSpeechRecognitionResult AVAudioEngine AVAudioApplication AVAudioPCMBuffer
 AVAudioInputNode DispatchWorkItem
 MapKit MKMapView MKCoordinateRegion MKPolyline Map MapPolyline MapCameraPosition
+Marker MKCoordinateSpan MapStyle
 Charts Combine AnyCancellable PassthroughSubject CurrentValueSubject
 Instruments SF Symbols Swift Darwin Dispatch DriveLayerCore DriveLayerApp
 SwiftUI UIKit CoreBluetooth CoreLocation CoreMotion WeatherKit CarPlay Observation

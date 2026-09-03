@@ -10,6 +10,10 @@ struct TripDetailView: View {
     let trip: Trip
     @Environment(AppEnvironment.self) private var environment
     @State private var comparison: TripComparison?
+    /// Remembered, because a driver who wants maps wants them every time — but it
+    /// starts off, so the first drive anyone opens shows the shape rather than a map
+    /// of where they were.
+    @AppStorage("trips.showRouteOnMap") private var showsMap = false
 
     private var formatter: DisplayFormatter { environment.formatter }
 
@@ -45,9 +49,30 @@ struct TripDetailView: View {
             // place names sit beneath, if they were resolved.
             if trip.routePolyline.count >= 2 {
                 VStack(alignment: .leading, spacing: DL.Spacing.small) {
-                    RouteGlyph(points: trip.routePolyline, lineWidth: 3)
-                        .frame(height: 140)
-                        .frame(maxWidth: .infinity)
+                    Group {
+                        if showsMap {
+                            TripMapView(points: trip.routePolyline)
+                                .clipShape(RoundedRectangle(cornerRadius: DL.Radius.card, style: .continuous))
+                        } else {
+                            RouteGlyph(points: trip.routePolyline, lineWidth: 3)
+                        }
+                    }
+                    .frame(height: 140)
+                    .frame(maxWidth: .infinity)
+
+                    // The glyph is the default and the map is the choice, not the other
+                    // way round: the shape says which drive this was without saying
+                    // where you live, and that is the safer thing to leave on screen.
+                    Button {
+                        withAnimation(DL.Motion.quick) { showsMap.toggle() }
+                    } label: {
+                        Label(showsMap ? "Show shape only" : "Show on map",
+                              systemImage: showsMap ? "scribble" : "map")
+                            .font(DL.Font.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DLColor.accent)
+
                     if trip.startPlaceName != nil || trip.endPlaceName != nil {
                         HStack(spacing: DL.Spacing.tight) {
                             Text(trip.startPlaceName ?? "Start")

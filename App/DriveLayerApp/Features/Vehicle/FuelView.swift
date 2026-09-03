@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 struct FuelView: View {
 
@@ -16,6 +17,7 @@ struct FuelView: View {
         List {
             statusSection
             if !economyResults.isEmpty { trendSection }
+            costSection
             entriesSection
         }
         .navigationTitle("Fuel")
@@ -65,10 +67,27 @@ struct FuelView: View {
         }
     }
 
+    /// Economy as a chart rather than a sparkline.
+    ///
+    /// A sparkline says "roughly this shape". With a date axis and a line for the
+    /// usual figure, the same data answers the question a driver actually has — is
+    /// this tank worse than my normal, or is my normal just this — which a shape
+    /// without a scale cannot.
+    ///
+    /// Every point is a full-to-full measurement. Partial fills are recorded for cost
+    /// and excluded here, so nothing on this chart is interpolated.
     private var trendSection: some View {
         Section("Economy over time") {
             VStack(alignment: .leading, spacing: DL.Spacing.small) {
-                Sparkline(values: Array(economyResults.map(\.kilometresPerLitre).reversed()))
+                if economyResults.count >= 2 {
+                    economyChart
+                } else {
+                    // One interval is a dot, not a trend. Say so rather than drawing a
+                    // line between a single point and nothing.
+                    Text("One full-to-full interval so far. A second one gives this a trend.")
+                        .font(DL.Font.caption)
+                        .foregroundStyle(DLColor.secondaryText)
+                }
                 HStack {
                     Text("Full-to-full, \(economyResults.count) interval\(economyResults.count == 1 ? "" : "s")")
                         .font(DL.Font.caption)
@@ -84,6 +103,100 @@ struct FuelView: View {
             }
             .padding(.vertical, DL.Spacing.tight)
         }
+    }
+
+    private var economyChart: some View {
+        let points = economyResults.compactMap { result -> (date: Date, value: Double)? in
+            guard let converted = formatter.economyUnit.value(fromKilometresPerLitre: result.kilometresPerLitre) else {
+                return nil
+            }
+            return (result.toDate, converted)
+        }
+        // The median rather than the mean: one bad tank should move the "usual" line
+        // hardly at all, and with a handful of intervals a mean lets it move a lot.
+        let sorted = points.map(\.value).sorted()
+        let median: Double? = sorted.isEmpty ? nil
+            : (sorted.count % 2 == 1 ? sorted[sorted.count / 2]
+                                     : (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2)
+
+        return Chart {
+            ForEach(points, id: \.date) { point in
+                AreaMark(x: .value("Date", point.date), y: .value("Economy", point.value))
+                    .foregroundStyle(LinearGradient(colors: [DLColor.accent.opacity(0.28), .clear],
+                                                    startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("Date", point.date), y: .value("Economy", point.value))
+                    .foregroundStyle(DLColor.accent)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .symbol { Circle().fill(DLColor.accent).frame(width: 5, height: 5) }
+            }
+            if let median {
+                RuleMark(y: .value("Usual", median))
+                    .foregroundStyle(DLColor.unknown.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .annotation(position: .top, alignment: .leading) {
+                        Text("Usual")
+                            .font(DL.Font.caption)
+                            .foregroundStyle(DLColor.secondaryText)
+                    }
+            }
+        }
+        .chartYAxisLabel(formatter.economyUnitLabel)
+        .frame(height: 150)
+        .accessibilityLabel(Text("Economy over time, \(points.count) full-to-full intervals."))
+    }
+
+    /// What the car costs to run, from the fills already recorded.
+    ///
+    /// `costPerKilometre` was already being computed for every full-to-full interval
+    /// and shown nowhere. Cost is the question owners actually ask about a car, and
+    /// this answers it without a single new measurement — only fills that carry a
+    /// price contribute, so a driver who logs litres but not money sees nothing here
+    /// rather than a total quietly missing half its fills.
+    @ViewBuilder
+    private var costSection: some View {
+        let priced = entries.filter { $0.totalCost != nil }
+        let perKilometre = economyResults.compactMap(\.costPerKilometre)
+        if !priced.isEmpty {
+            let total = priced.compactMap(\.totalCost).reduce(0, +)
+            let average = perKilometre.isEmpty ? nil : perKilometre.reduce(0, +) / Double(perKilometre.count)
+            Section("Running cost") {
+                DLAdaptiveRow {
+                    MetricView(label: "Fuel recorded",
+                               value: formatter.decimal(total),
+                               provenance: .measured)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MetricView(label: "Per \(formatter.distanceUnitLabel)",
+                               value: average.flatMap { formatter.decimal(costPerDisplayDistance($0), fractionDigits: 2) },
+                               provenance: .estimated)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, DL.Spacing.tight)
+
+                Text(costCaption(pricedCount: priced.count, intervalCount: perKilometre.count))
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Says what the totals are actually made of, including what they leave out — a
+    /// spend figure quietly missing half the fills is worse than no figure.
+    private func costCaption(pricedCount: Int, intervalCount: Int) -> String {
+        var parts = ["From \(pricedCount) fill\(pricedCount == 1 ? "" : "s") with a price recorded."]
+        if intervalCount > 0 {
+            parts.append("Cost per \(formatter.distanceUnitLabel) is averaged over \(intervalCount) full-to-full interval\(intervalCount == 1 ? "" : "s").")
+        }
+        let unpriced = entries.count - pricedCount
+        if unpriced > 0 {
+            parts.append("\(unpriced) fill\(unpriced == 1 ? "" : "s") without a price \(unpriced == 1 ? "is" : "are") left out.")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// Cost is computed per kilometre; a driver reading miles wants it per mile.
+    private func costPerDisplayDistance(_ perKilometre: Double) -> Double {
+        formatter.unitSystem == .metric ? perKilometre : perKilometre / 0.621_371
     }
 
     @ViewBuilder
