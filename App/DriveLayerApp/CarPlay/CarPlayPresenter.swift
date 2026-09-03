@@ -196,6 +196,20 @@ final class CarPlayPresenter {
             })
         }
 
+        // Cost per distance, from the same snapshot the widgets read. Descriptive
+        // rather than judged: DriveLayer has no opinion about what a kilometre ought
+        // to cost, so this tile carries no status colour.
+        if let snapshot = WidgetSnapshotStore.read(), let cost = snapshot.costPerKilometre {
+            let perDisplayUnit = formatter.unitSystem == .metric ? cost : cost / 0.621_371
+            let amount = formatter.decimal(perDisplayUnit, fractionDigits: 2) ?? "—"
+            buttons.append(CPGridButton(titleVariants: ["\(amount) / \(formatter.distanceUnitLabel)"],
+                                        image: tileImage(symbolName: InsightCategory.efficiency.symbolName,
+                                                         status: nil)) { [weak self] _ in
+                self?.presentInformation(title: "Running cost",
+                                         lines: ["About \(amount) per \(formatter.distanceUnitLabel), averaged over the fills you have priced."])
+            })
+        }
+
         return buttons
     }
 
@@ -203,8 +217,22 @@ final class CarPlayPresenter {
 
     private func aheadButtons(_ environment: AppEnvironment) -> [CPGridButton] {
         let drive = environment.drive
+        let formatter = environment.formatter
         let weatherSeverity = severity(forCategory: .weather, in: drive.insights)
         var buttons: [CPGridButton] = []
+
+        // Reachability leads this tab, because it is the only tile here with a
+        // consequence: rain ahead changes how you drive, a shortfall changes whether
+        // you stop. This is also the tile that most wants to be in the car rather than
+        // on the phone - it answers a question that only exists while driving.
+        if let verdict = drive.journeyReserve, verdict != .unknown {
+            buttons.append(CPGridButton(titleVariants: [reserveTitle(verdict, formatter: formatter)],
+                                        image: tileImage(symbolName: "fuelpump.arrowtriangle.right",
+                                                         status: verdict.status)) { [weak self] _ in
+                self?.presentInformation(title: drive.destination?.name ?? "Your destination",
+                                         lines: [drive.journeySentence].compactMap { $0 })
+            })
+        }
 
         if let change = drive.weatherChanges.first {
             buttons.append(CPGridButton(titleVariants: [change.headline.capitalized],
@@ -230,6 +258,26 @@ final class CarPlayPresenter {
         }
 
         return buttons
+    }
+
+    /// The reserve as a tile title: a number and a word, not a sentence.
+    ///
+    /// The full sentence is one tap away on the information template. What fits on a
+    /// tile at a glance is whether you make it and by how much - "+84 km spare" or
+    /// "62 km short" - and the distance is in the driver's own units because a figure
+    /// in kilometres to someone reading miles is worse than no figure.
+    private func reserveTitle(_ verdict: FuelIntelligence.ReserveVerdict,
+                              formatter: DisplayFormatter) -> String {
+        func distance(_ kilometres: Double) -> String {
+            let value = formatter.distance(kilometres: kilometres, fractionDigits: 0) ?? "—"
+            return "\(value) \(formatter.distanceUnitLabel)"
+        }
+        switch verdict {
+        case let .comfortable(reserve): return "\(distance(reserve)) spare"
+        case let .tight(reserve): return "\(distance(reserve)) spare"
+        case let .insufficient(shortfall): return "\(distance(shortfall)) short"
+        case .unknown: return "No estimate"
+        }
     }
 
     /// A grid needs at least two buttons to read as a grid rather than a stray tile.

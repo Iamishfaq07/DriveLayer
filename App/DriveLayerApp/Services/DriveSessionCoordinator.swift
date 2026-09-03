@@ -102,6 +102,51 @@ final class DriveSessionCoordinator {
     /// can be re-measured as the driver moves without refetching anything.
     private var routeWeatherPoints: [RouteWeatherPoint] = []
     private var routePolyline: [GeoPoint] = []
+
+    /// How far the road to the destination still runs, in kilometres, or `nil` when
+    /// there is no destination or no route for it yet.
+    ///
+    /// Measured along the polyline MapKit returned rather than as the crow flies: a
+    /// straight line between two points in the hills is not a distance any car will
+    /// travel, and this number is about to be compared against a fuel range.
+    /// `routeLength` rather than `pathDistance`: these are MapKit's road geometry, not
+    /// recorded fixes, and `pathDistance` would discard every one of them for having
+    /// no accuracy and hand back zero. See the note on `Geo.routeLength`.
+    var remainingRouteKm: Double? {
+        guard routePolyline.count >= 2 else { return nil }
+        return Geo.routeLength(routePolyline) / 1_000
+    }
+
+    /// Whether the tank covers the road ahead — the question an EV dashboard answers
+    /// continuously and a petrol car leaves to the driver's arithmetic.
+    ///
+    /// `FuelIntelligence.assessJourney` has been tested since the fuel work landed and
+    /// called by nothing. This is the seam that gets it to a driver.
+    var journeyReserve: FuelIntelligence.ReserveVerdict? {
+        guard destination != nil, let distance = remainingRouteKm else { return nil }
+        return FuelIntelligence.assessJourney(distanceKm: distance, status: fuelStatus)
+    }
+
+    /// The same verdict as a sentence, for the places that show one line rather than a
+    /// number. Nil where there is nothing to say.
+    var journeySentence: String? {
+        guard destination != nil, let distance = remainingRouteKm else { return nil }
+        return FuelIntelligence.journeyMessage(distanceKm: distance, status: fuelStatus)
+    }
+
+    /// What a kilometre costs, averaged over the full-to-full intervals that carry a
+    /// price. Nil when no fill has one.
+    ///
+    /// Published into the widget snapshot rather than computed by each surface, so the
+    /// phone, the widgets, Siri and CarPlay all quote one number. Cost only changes
+    /// when a fill is added, so recomputing it on the analysis pass is cheap.
+    private func averageCostPerKilometre(vehicleID: UUID) -> Double? {
+        let results = FuelCalculations.economyResults(from: store.fuelEntries(vehicleID: vehicleID))
+        let costs = results.compactMap(\.costPerKilometre)
+        guard !costs.isEmpty else { return nil }
+        return costs.reduce(0, +) / Double(costs.count)
+    }
+
     private let analysisInterval: TimeInterval = 5
     /// How often the live drive and its telemetry are written to disk.
     ///
@@ -660,6 +705,7 @@ final class DriveSessionCoordinator {
                                         fuel: fuelStatus,
                                         nextService: maintenance.first { $0.status != .unknown },
                                         lastTrip: recentTrips.first(where: \.isComplete),
+                                        costPerKilometre: averageCostPerKilometre(vehicleID: vehicle.id),
                                         headline: InsightEngine.headline(insights),
                                         isAdapterConnected: obd.isConnected)
         LiveActivityController.shared.update(trip: currentTrip,

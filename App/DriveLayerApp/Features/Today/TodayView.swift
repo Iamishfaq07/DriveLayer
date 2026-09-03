@@ -35,8 +35,9 @@ struct TodayView: View {
                         healthCard.dlArrive(index: 1)
                         hyperionCard.dlArrive(index: 2)
                         quickFacts.dlArrive(index: 3)
-                        insightsSection.dlArrive(index: 4)
-                        nextServiceSection.dlArrive(index: 5)
+                        parkedSection.dlArrive(index: 4)
+                        insightsSection.dlArrive(index: 5)
+                        nextServiceSection.dlArrive(index: 6)
                     }
                 }
                 .dlScreenPadding()
@@ -216,6 +217,20 @@ struct TodayView: View {
 
             lastDriveTile
             weatherTile
+        }
+    }
+
+    /// Where the car is, once it has stopped being driven.
+    ///
+    /// Hidden while recording: a car in motion is not parked, and showing the last
+    /// spot mid-drive would be pointing at a place the car has already left.
+    @ViewBuilder
+    private var parkedSection: some View {
+        if !drive.isRecording,
+           let lastTrip = environment.selectedVehicle.flatMap({
+               environment.store.trips(vehicleID: $0.id, limit: 1).first
+           }), lastTrip.isComplete {
+            ParkedCard(trip: lastTrip, formatter: formatter)
         }
     }
 

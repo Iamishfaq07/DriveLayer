@@ -18,7 +18,7 @@ The root is a tab bar over four screens:
    battery?" already give, not a new one.
 4. **Hyperion** — engine assessment status, when there is anything assessed yet.
 
-**Trip** (grid) — up to three tiles, kept apart from Vehicle so neither grid grows
+**Trip** (grid) — up to four tiles, kept apart from Vehicle so neither grid grows
 past a glance:
 
 1. **Range** — estimated distance remaining, labelled as such.
@@ -26,11 +26,18 @@ past a glance:
    trip, read from the same snapshot the widgets and Siri already use.
 3. **Next service** — what's due and when, from the same maintenance status the
    health screen shows.
+4. **Running cost** — cost per distance, averaged over the fills that carry a price.
+   No status colour: DriveLayer has no opinion about what a kilometre ought to cost.
 
-**Ahead** (grid) — up to two tiles:
+**Ahead** (grid) — up to three tiles:
 
-1. **Weather** — the next meaningful change on the route, or current conditions.
-2. **Terrain** — the climb or descent underway or coming up.
+1. **Reachability** — whether the tank covers the road to the destination, as spare
+   or shortfall. It leads this tab because it is the only tile here with a
+   consequence: rain ahead changes how you drive, a shortfall changes whether you
+   stop. It is also the tile that most belongs in the car rather than on the phone,
+   because it answers a question that only exists while driving.
+2. **Weather** — the next meaningful change on the route, or current conditions.
+3. **Terrain** — the climb or descent underway or coming up.
 
 **Ask Harrier** (list) — all of the copilot's example questions, each already
 routing to a real answer rather than a stub. Nothing here is shortened for space;
@@ -52,6 +59,28 @@ underlying tile; it just stops interrupting about the same thing twice.
 What CarPlay deliberately does not have: charts, scrolling telemetry, trip history,
 settings, or any interaction that needs more than a glance. Refresh is on a
 ten-second timer: frequent enough for status, slow enough to be ignorable.
+
+## What stays on the phone, and why
+
+Not every screen can cross over, and two of them cannot for reasons that are Apple's
+rather than this project's.
+
+| Phone screen | On CarPlay? | Why |
+|---|---|---|
+| Reachability | **Yes** | Belongs in the car more than on the phone. |
+| Running cost | **Yes** | A value and a label; a tile holds it. |
+| Vehicle, battery, engine, range, service, last drive | **Yes** | All present as tiles. |
+| Ask Harrier, including spoken questions | **Yes** | The list, plus voice on iOS 27. |
+| The live drive | **Yes** | On the dashboard, as a Live Activity. |
+| Trip map | **No — not possible** | A driving-task app gets no custom drawing. `CPMapTemplate` is the only template that can draw a map and it is restricted to the Navigation category. |
+| Economy chart | **No — not possible** | Same ceiling: no canvas, no chart, no gauge. |
+| Where you parked | **No — pointless** | You are sitting in the car. |
+| Fuel entry, documents, settings, trip history | **No — by choice** | Typing a fill-up or scanning insurance at the wheel is exactly what CarPlay review exists to prevent. |
+
+The first two are worth being blunt about, because no amount of work changes them:
+Apple gives a driving-task app four templates and none of them draws anything. A map
+or a chart on this app's CarPlay screen is not a thing that can be built, by anyone,
+today.
 
 **On graphics:** a grid of tinted icon tiles is the ceiling, not a design choice
 short of one. `CPGridTemplate`, `CPListTemplate`, `CPInformationTemplate`,
