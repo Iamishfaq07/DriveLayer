@@ -134,6 +134,19 @@ final class DriveSessionCoordinator {
         return FuelIntelligence.journeyMessage(distanceKm: distance, status: fuelStatus)
     }
 
+    /// What a kilometre costs, averaged over the full-to-full intervals that carry a
+    /// price. Nil when no fill has one.
+    ///
+    /// Published into the widget snapshot rather than computed by each surface, so the
+    /// phone, the widgets, Siri and CarPlay all quote one number. Cost only changes
+    /// when a fill is added, so recomputing it on the analysis pass is cheap.
+    private func averageCostPerKilometre(vehicleID: UUID) -> Double? {
+        let results = FuelCalculations.economyResults(from: store.fuelEntries(vehicleID: vehicleID))
+        let costs = results.compactMap(\.costPerKilometre)
+        guard !costs.isEmpty else { return nil }
+        return costs.reduce(0, +) / Double(costs.count)
+    }
+
     private let analysisInterval: TimeInterval = 5
     /// How often the live drive and its telemetry are written to disk.
     ///
@@ -692,6 +705,7 @@ final class DriveSessionCoordinator {
                                         fuel: fuelStatus,
                                         nextService: maintenance.first { $0.status != .unknown },
                                         lastTrip: recentTrips.first(where: \.isComplete),
+                                        costPerKilometre: averageCostPerKilometre(vehicleID: vehicle.id),
                                         headline: InsightEngine.headline(insights),
                                         isAdapterConnected: obd.isConnected)
         LiveActivityController.shared.update(trip: currentTrip,

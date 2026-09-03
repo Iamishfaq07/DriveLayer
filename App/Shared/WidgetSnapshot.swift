@@ -23,6 +23,10 @@ struct WidgetSnapshot: Codable, Sendable, Equatable {
     var lastTripDurationSeconds: Double?
     var lastTripEconomyKmPerLitre: Double?
     var lastTripEndedAt: Date?
+    /// Averaged over the full-to-full intervals that carry a price, in the currency
+    /// the driver typed. Nil when no fill has a price on it — a cost figure built from
+    /// half the fills would be worse than none.
+    var costPerKilometre: Double?
     var headlineInsightTitle: String?
     var headlineInsightSummary: String?
     var isAdapterConnected: Bool
@@ -49,6 +53,7 @@ struct WidgetSnapshot: Codable, Sendable, Equatable {
         lastTripDurationSeconds: 47 * 60,
         lastTripEconomyKmPerLitre: 12.8,
         lastTripEndedAt: Date().addingTimeInterval(-3_600),
+        costPerKilometre: 7.4,
         headlineInsightTitle: "BATTERY WATCH",
         headlineInsightSummary: "Battery voltage has been trending below your normal baseline.",
         isAdapterConnected: true
@@ -69,6 +74,7 @@ struct WidgetSnapshot: Codable, Sendable, Equatable {
         lastTripDurationSeconds: nil,
         lastTripEconomyKmPerLitre: nil,
         lastTripEndedAt: nil,
+        costPerKilometre: nil,
         headlineInsightTitle: nil,
         headlineInsightSummary: nil,
         isAdapterConnected: false

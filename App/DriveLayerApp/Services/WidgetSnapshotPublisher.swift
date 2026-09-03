@@ -18,6 +18,7 @@ enum WidgetSnapshotPublisher {
                         fuel: FuelStatus,
                         nextService: MaintenanceDueStatus?,
                         lastTrip: Trip?,
+                        costPerKilometre: Double?,
                         headline: DriveInsight?,
                         isAdapterConnected: Bool) {
         guard let vehicle else {
@@ -39,6 +40,7 @@ enum WidgetSnapshotPublisher {
             lastTripDurationSeconds: lastTrip?.totalDurationSeconds,
             lastTripEconomyKmPerLitre: lastTrip?.economyKmPerLitre,
             lastTripEndedAt: lastTrip?.endedAt,
+            costPerKilometre: costPerKilometre,
             headlineInsightTitle: headline?.title,
             headlineInsightSummary: headline?.summary,
             isAdapterConnected: isAdapterConnected
