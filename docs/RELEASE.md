@@ -191,6 +191,19 @@ disagree — unzips the exported IPA and asks the binary directly what it was si
 with, plus whether the CarPlay scene role survived into its `Info.plist`. Either
 check failing stops the run before upload and prints the fix above.
 
+**The second cause, found by that binary check on the first run where the profile
+was finally correct:** the entitlements file was being overwritten before the build
+ever read it. `project.yml` declared an `entitlements:` block for each target, and
+that XcodeGen key does not point a target at a file — it *writes* one at that path
+on every generation, from its own `properties`. With no properties it writes an
+empty dict, so `xcodegen generate` in CI replaced both committed entitlements files
+with `<dict/>`, and the app shipped signed with neither the CarPlay entitlement nor
+the app group. `CODE_SIGN_ENTITLEMENTS` alone is what names a file without
+rewriting it, exactly as `INFOPLIST_FILE` does for the plist.
+
+The generation step now fails if `xcodegen generate` modifies anything tracked in
+git, so a generated file can no longer quietly replace a committed one.
+
 ### If the app is still not in CarPlay after a green build
 
 With the workflow checks passing, the build is entitled and declares the scene, so

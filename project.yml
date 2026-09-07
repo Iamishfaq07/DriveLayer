@@ -74,8 +74,21 @@ targets:
     #
     # INFOPLIST_FILE below is the whole of what is needed: it tells the build which
     # file to use, and nothing then rewrites it.
-    entitlements:
-      path: App/DriveLayerApp/Resources/DriveLayer.entitlements
+    # There is no `entitlements:` block for the same reason there is no `info:`
+    # block, and the cost of learning it twice was six TestFlight builds. That key
+    # does not point the build at a file - it *writes* one, on every generation,
+    # from its own `properties`. With no properties it writes an empty dict, so
+    # `xcodegen generate` in CI replaced the committed entitlements with `<dict/>`
+    # before xcodebuild ever read them.
+    #
+    # Nothing failed. Export re-signs against the profile and simply drops what it
+    # is not asked for, so the archive succeeded, TestFlight accepted the build,
+    # the app installed and ran - and it was signed with neither the app group nor
+    # the CarPlay entitlement. That is why the app never appeared in CarPlay, and
+    # why the widgets could not read the app's snapshot.
+    #
+    # CODE_SIGN_ENTITLEMENTS below is the whole of what is needed: it names the
+    # file to sign with, and nothing then rewrites it.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app
@@ -149,8 +162,9 @@ targets:
     # the extension's plist. Here the casualty was NSExtensionPointIdentifier, and
     # an app extension without it is not a widget as far as Apple is concerned -
     # which is exactly what the upload said.
-    entitlements:
-      path: App/DriveLayerWidgets/DriveLayerWidgets.entitlements
+    # No `entitlements:` block either, and for the same reason - see the app
+    # target. Here the casualty was the app group, which is the only thing that
+    # lets this extension read what the app wrote.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.drivelayer.app.widgets
