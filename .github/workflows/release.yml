@@ -196,7 +196,9 @@ jobs:
             tmp="$RUNNER_TEMP/$output.mobileprovision"
             if ! printf '%s' "$raw" | base64 --decode > "$tmp" 2>/dev/null || [ ! -s "$tmp" ]; then
               fail "$secret is not valid base64." \
-                   "Re-encode the .mobileprovision and paste the whole output. See docs/RELEASE.md 4b."
+                   "Re-encode the .mobileprovision and paste the whole output. See docs/RELEASE.md 4b." \
+                   "The app and the widget have separate secrets and it is easy to update one while" \
+                   "meaning the other, or to paste only part of a very long line."
             fi
 
             # A .mobileprovision is CMS-signed; the plist has to be unwrapped first.
@@ -235,7 +237,6 @@ jobs:
           }
 
           install_profile "$APP_PROFILE"    BUILD_PROVISION_PROFILE_BASE64        com.drivelayer.app         app_profile_name
-          install_profile "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 com.drivelayer.app.widgets widget_profile_name
 
           # The app profile must actually grant CarPlay, and this is checked because
           # the failure it catches is silent. Export re-signs against the profile, so
@@ -260,6 +261,8 @@ jobs:
                  "will not have it, and every other check here will still pass."
           fi
           rm -f "$app_plist" "$RUNNER_TEMP/app_check.mobileprovision"
+
+          install_profile "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 com.drivelayer.app.widgets widget_profile_name
 
       - name: Write the App Store Connect API key
         env:
