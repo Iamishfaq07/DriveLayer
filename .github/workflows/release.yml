@@ -145,8 +145,32 @@ jobs:
 
       - name: Generate the Xcode project
         run: |
+          set -euo pipefail
           brew install xcodegen
           xcodegen generate
+
+          # Generation must read the repository, never write to it. XcodeGen's
+          # `info:` and `entitlements:` keys do not point a target at a file -
+          # they generate one at that path on every run, silently replacing
+          # whatever was committed there. Both have already cost this project a
+          # round of broken uploads: the plist one was caught because Apple
+          # rejected the build, the entitlements one was not, because a missing
+          # entitlement is dropped at export rather than refused.
+          #
+          # So: if generating the project changed a tracked file, stop. The build
+          # that would follow is a build of something other than what is in git.
+          if ! git diff --quiet --exit-code; then
+            echo "::error::xcodegen generate modified files that are committed to the repository."
+            echo "  The build would use the generated version, not the one in git."
+            echo '  The usual cause is an info: or entitlements: block in project.yml;'
+            echo "  name the file through INFOPLIST_FILE or CODE_SIGN_ENTITLEMENTS instead."
+            echo "  Changed files:"
+            git --no-pager diff --stat
+            echo "  Diff:"
+            git --no-pager diff
+            exit 1
+          fi
+          echo "Project generated without modifying anything tracked in git."
 
       - name: Import the signing certificate
         env:
