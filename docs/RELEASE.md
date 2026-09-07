@@ -204,6 +204,14 @@ rewriting it, exactly as `INFOPLIST_FILE` does for the plist.
 The generation step now fails if `xcodegen generate` modifies anything tracked in
 git, so a generated file can no longer quietly replace a committed one.
 
+**And the profile check is no longer only about CarPlay.** With the entitlements
+file finally reaching the build, the archive failed on a *different* missing
+capability — App Groups, which the app profile had never carried either. Both
+failures are the same shape, so the check now compares each profile against its
+target's whole entitlements file and reports every missing key at once. A missing
+capability costs a trip to Apple's portal and a new secret; finding them one per
+run turns one trip into several.
+
 ### If the app is still not in CarPlay after a green build
 
 With the workflow checks passing, the build is entitled and declares the scene, so
