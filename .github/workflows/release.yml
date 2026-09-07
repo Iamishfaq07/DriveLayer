@@ -260,33 +260,73 @@ jobs:
             rm -f "$plist" "$tmp"
           }
 
-          install_profile "$APP_PROFILE"    BUILD_PROVISION_PROFILE_BASE64        com.drivelayer.app         app_profile_name
+          # Every entitlement a target asks for must also be granted by its profile,
+          # and this is checked because both ways of getting it wrong are quiet in
+          # different places. Export re-signs against the profile and *drops* an
+          # entitlement the profile lacks: the build goes green, TestFlight accepts
+          # it, the app installs, and the feature is simply absent with nothing
+          # anywhere saying why. Archive is louder - it refuses - but only after
+          # several minutes of compiling, and only about the first target it reaches.
+          #
+          # So the profiles are checked against the committed entitlements files
+          # before anything is built, and every missing key is reported at once. A
+          # missing capability means a trip to Apple's portal and a new secret, and
+          # finding them one per run turns one trip into several.
+          #
+          # The comparison is against the entitlements file rather than a hardcoded
+          # list, so adding a capability to the app cannot silently outgrow the check.
+          require_profile_entitlements() {
+            encoded="$1"; secret="$2"; entitlements_file="$3"; app_id="$4"
 
-          # The app profile must actually grant CarPlay, and this is checked because
-          # the failure it catches is silent. Export re-signs against the profile, so
-          # an entitlement the profile does not carry is dropped rather than refused:
-          # the build goes green, TestFlight accepts it, the app installs, and CarPlay
-          # simply never lists it. Nothing anywhere says why. A profile issued before
-          # Apple granted the entitlement looks completely normal to every other check
-          # in this job - right bundle ID, right name, valid dates.
-          app_plist="$RUNNER_TEMP/app_profile_check.plist"
-          printf '%s' "$APP_PROFILE" | base64 --decode > "$RUNNER_TEMP/app_check.mobileprovision"
-          security cms -D -i "$RUNNER_TEMP/app_check.mobileprovision" > "$app_plist"
-          if /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.carplay-driving-task' \
-               "$app_plist" >/dev/null 2>&1; then
-            echo "App profile grants com.apple.developer.carplay-driving-task."
-          else
-            fail "The app provisioning profile does not grant CarPlay." \
-                 "com.apple.developer.carplay-driving-task is in DriveLayer.entitlements but not in the profile," \
-                 "so export will silently drop it and the app will not appear in CarPlay." \
-                 "Fix: in the Developer portal enable the CarPlay capability on the App ID com.drivelayer.app," \
-                 "regenerate the App Store provisioning profile, then re-encode it into" \
-                 "BUILD_PROVISION_PROFILE_BASE64. A profile made before Apple granted the entitlement" \
-                 "will not have it, and every other check here will still pass."
-          fi
-          rm -f "$app_plist" "$RUNNER_TEMP/app_check.mobileprovision"
+            raw="$RUNNER_TEMP/check.mobileprovision"
+            plist="$RUNNER_TEMP/check.plist"
+            printf '%s' "$encoded" | base64 --decode > "$raw"
+            security cms -D -i "$raw" > "$plist"
+
+            # Read the keys into a variable first rather than piping straight into
+            # the loop: a failure inside a process substitution does not stop the
+            # script, so the loop would read nothing and the check would pass by
+            # saying so. An empty list here means the file could not be read.
+            keys="$(plutil -convert json -o - "$entitlements_file" | jq -r 'keys[]')"
+            if [ -z "$keys" ]; then
+              fail "Could not read any entitlement keys from $entitlements_file." \
+                   "The check cannot pass without them, so it is failing rather than assuming."
+            fi
+
+            # A newline-joined string rather than an array: /bin/bash on the runner
+            # is 3.2, where expanding an empty array under `set -u` aborts the script.
+            missing=""
+            for key in $keys; do
+              /usr/libexec/PlistBuddy -c "Print :Entitlements:$key" "$plist" >/dev/null 2>&1 \
+                || missing="$missing  - $key"$'\n'
+            done
+
+            rm -f "$raw" "$plist"
+
+            if [ -z "$missing" ]; then
+              echo "$secret grants everything $entitlements_file asks for."
+              return
+            fi
+
+            echo "::error::The provisioning profile in $secret is missing entitlements the build requires."
+            echo "  These keys are in $entitlements_file but not in the profile:"
+            printf '%s' "$missing"
+            echo "  Fix, in the Developer portal:"
+            echo "    1. Identifiers -> $app_id -> enable the capability matching each key above."
+            echo "       App Groups needs the group itself ticked too, not just the capability on."
+            echo "    2. Regenerate that App Store provisioning profile. Editing the App ID marks the"
+            echo "       existing profile Invalid; it is not updated in place and has to be reissued."
+            echo "    3. Re-encode the downloaded profile and replace the secret $secret."
+            exit 1
+          }
+
+          install_profile "$APP_PROFILE"    BUILD_PROVISION_PROFILE_BASE64        com.drivelayer.app         app_profile_name
+          require_profile_entitlements "$APP_PROFILE" BUILD_PROVISION_PROFILE_BASE64 \
+            App/DriveLayerApp/Resources/DriveLayer.entitlements com.drivelayer.app
 
           install_profile "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 com.drivelayer.app.widgets widget_profile_name
+          require_profile_entitlements "$WIDGET_PROFILE" BUILD_PROVISION_PROFILE_WIDGET_BASE64 \
+            App/DriveLayerWidgets/DriveLayerWidgets.entitlements com.drivelayer.app.widgets
 
       - name: Write the App Store Connect API key
         env:
