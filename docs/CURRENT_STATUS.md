@@ -1,48 +1,42 @@
-# Current status
+# DriveLayer current status
 
-Updated 2026-09-08. This file supersedes historical readiness claims in README, AUDIT and ROADMAP.
+Updated 2026-09-08. This document supersedes readiness claims in historical audit and roadmap files.
 
 ## Release decision: NO-GO
 
-Version in project.yml: 0.1.0 (local build setting 1; TestFlight numbering is workflow-managed).
-Only selectable production profile: Tata Harrier 2026 Adventure X+ 1.5L Hyperion turbo GDI petrol. Selection is not proof of hardware validation. No manufacturer-specific request has been validated by this work.
+The only selectable production profile is Tata Harrier 2026 Adventure X+ with the 1.5L Hyperion Turbo GDI petrol engine. The profile name is configuration, not proof of hardware validation. No Tata manufacturer PID is enabled.
 
-## Baseline evidence
+## Status
 
-Inspected baseline commit: e5c5e88bfef4fc2780d6791a17137321834646a4.
-GitHub CI run 34204888927 passed the four existing jobs. Latest TestFlight run 34146454586 succeeded. Those runs predate this work.
-Local Windows baseline: swiftcheck checked 168 files / 489 declared types, zero errors and warnings after installing PyYAML. bundlecheck: five checks passed. No local Swift, Xcode, iOS SDK or CarPlay Simulator is installed. iOS 27 API compatibility has not been verified.
+- **IMPLEMENTED:** read-only standard OBD polling and discovery; partial diagnostic snapshots; provenance-preserving telemetry and evidence; sensor availability; honest health coverage; trip recording; fuel log; maintenance and documents; widgets and Live Activity; deterministic adaptive CarPlay Now/Drive/Ahead/Ask; native voice phases; Mechanic Mode; per-vehicle baselines, warm-up history, and preferred adapters.
+- **TESTED:** static and bundle checks; 570 core tests and 52 app-target tests passed in CI; automated regression coverage includes diagnostic truth, provenance, Mode 01 recovery, health coverage, ranking/hysteresis, voice identifiers, warm-up tracking, fuel-trim gating, and storage relationships. CI reported only the existing multiple-destination and `UIDeviceFamily` plist warnings.
+- **PARTIAL:** Mechanic Mode exports a sanitised capability report and settings exports owner data. Dedicated diagnostic JSON, telemetry CSV, and trip GPX remain incomplete. Battery logic distinguishes resting and charging voltage; real cranking sampling is unvalidated. Ownership reports, event recorder, tyres, and post-drive briefing remain incomplete.
+- **UNTESTED:** physical Harrier telemetry, production adapter over real drives, real CarPlay, iOS 27 hardware voice, accessibility, background endurance, and upgrade migration from an App Store database.
+- **BLOCKED:** App Store release until Harrier, BLE, CarPlay, signed entitlement, migration, and privacy/export/deletion evidence is recorded in `RELEASE_VALIDATION.md`.
+- **FUTURE:** Tata-specific PIDs, TPMS, door/boot state, manufacturer turbo/transmission/drive-mode/GPF telemetry, and additional production vehicles.
 
-## Current fix group: telemetry trust and polling
+## Data truth
 
-- Explicit trusted reads require good quality, finite values and nonnegative age within the caller's freshness window.
-- Last-known entries remain available for labelled diagnostics, including first-frame rejection reasons.
-- Live intelligence, trip inputs and downsampling use trusted reads.
-- Fuel uses the original trusted sample timestamp and source; range retains simulation provenance.
-- MAF and timing advance are mapped into production polling; diagnostic-only PIDs remain separate.
-- A production baseline collector rejects non-measured samples and uncertain engine context, deduplicates sensor timestamps, and learns intake-minus-ambient separately for warmed contexts.
-- Existing persisted model shapes and telemetry codec indices are unchanged.
+Unknown values remain absent, stale values retain timestamps, rejected samples stay diagnostic-only, simulation cannot enter production learning, estimated boost remains estimated, and an empty diagnostic code list is reassuring only after relevant supported requests succeed. Health says “Healthy” only for full assessed coverage; partial normal evidence says assessed systems look normal.
 
-Validation of this group: local static checks passed; new Swift regression tests have been added. CI execution results will be recorded after the run completes. Do not interpret added tests as executed tests.
+## Entitlements and external services
 
-## Capability status
+The repository declares the CarPlay driving-task scene and entitlement. A signed archive check and real head-unit test remain required. WeatherKit is disabled by configuration and entitlement, so weather remains unavailable in production. MapKit supplies road distance when available; terrain cannot be authoritative until a real elevation provider is validated.
 
-IMPLEMENTED: read-only standard OBD decoding/discovery, trip recording, local storage, fuel log, maintenance/document records, on-device copilot fallback, CarPlay templates, widgets and Live Activity.
-PARTIAL: contextual engine intelligence, baseline quality corrections, diagnostic workspace, contextual route/weather, voice lifecycle, ownership reports, multi-car adapter ownership, migration recovery.
-BLOCKED BY HARDWARE: confirmed Harrier PID inventory, all Harrier-specific validation claims, long-drive BLE and real CarPlay validation.
-BLOCKED BY API: route elevation source and source-backed exact-vehicle manual content need an approved source/integration; iOS 27 SDK validation requires an available Mac toolchain.
-FUTURE: validated manufacturer telemetry, external TPMS integration, Watch after phone/CarPlay stability.
+## Vehicle capability matrix
 
-## Entitlements and services
+- **MEASURED when supported and fresh:** standard OBD speed, RPM, coolant, load, intake and ambient temperature, MAP, BARO, MAF, timing, fuel level, trims, fuel-loop state, module voltage, MIL/readiness, and standard diagnostic codes.
+- **ESTIMATED:** fuel range and journey reserve from trusted fuel/economy inputs; boost only from aligned fresh MAP minus BARO accepted by the estimator.
+- **INFERRED:** thermal phase, learned comparisons, health and Hyperion conclusions, battery trend, and drive context.
+- **UNAVAILABLE:** TPMS pressure, door/window/boot state, oil life, battery state of health, remote control, authoritative route elevation, and WeatherKit in production.
+- **UNVALIDATED:** every Tata-specific signal and every standard PID on the named Harrier until a sanitised real-car session is recorded.
 
-CarPlay driving-task entitlement and CarPlay scene are declared in the repository. The successful release workflow checks signed entitlements; this is distinct from head-unit validation.
-WeatherKit is disabled: DLWeatherKitEnabled is false and the production entitlements do not enable WeatherKit. Weather-related features must show unavailable.
-Hardware evidence is not supplied in this checkout. See REAL_CAR_VALIDATION.md; unchecked scenarios remain release blockers.
+## Release blockers
 
-## Remaining blockers
-
-- Full repository audit and later implementation phases remain in progress; this is not an App Store readiness certificate.
-- BLE timeout/callback cleanup, transient PID recovery, database opening recovery.
-- CarPlay simulator matrix, installed iOS 27 API review, voice and alert lifecycle validation.
-- Hardware, accessibility and sustained background operation evidence.
-- Source-backed profile specifications/service schedules and privacy copy review.
+1. Record the real Harrier capability bundle and plausible values.
+2. Complete long-drive, background, interruption, ignition-cycle, and adapter recovery tests.
+3. Validate CarPlay Simulator and a real head unit, including voice and urgent states.
+4. Validate archive signing and the granted CarPlay entitlement.
+5. Upgrade an existing installed database and verify the new persisted models.
+6. Finish diagnostic/telemetry/trip exports and verify delete-all coverage.
+7. Complete accessibility, privacy-copy, offline, and degraded-state review.

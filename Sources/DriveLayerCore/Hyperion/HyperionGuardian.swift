@@ -112,6 +112,11 @@ enum HyperionGuardian {
                        warmUpHistory: [WarmUpObservation] = [],
                        intakeDeltaBaseline: MetricBaseline? = nil,
                        fuelSystem: FuelSystemStatus = .unknown,
+                       shortTermFuelTrim: Provenanced<Double> = .unavailable(),
+                       longTermFuelTrim: Provenanced<Double> = .unavailable(),
+                       isWarmedCruise: Bool = false,
+                       shortTermFuelTrimBaseline: MetricBaseline? = nil,
+                       longTermFuelTrimBaseline: MetricBaseline? = nil,
                        monitorStatus: MonitorStatus? = nil,
                        voltage: Provenanced<Double> = .unavailable(),
                        isEngineRunning: Bool? = nil,
@@ -168,7 +173,22 @@ enum HyperionGuardian {
         // Fuel system. The loop state is readable now; the trims that sit on top of it are
         // not interpreted yet, and the section describes which of the two it is talking
         // about rather than implying the whole area is covered.
-        if fuelSystem == .unknown {
+        if let correction = FuelCorrectionIntelligence.assess(
+            shortTerm: shortTermFuelTrim,
+            longTerm: longTermFuelTrim,
+            fuelSystem: fuelSystem,
+            isWarmedCruise: isWarmedCruise,
+            shortTermBaseline: shortTermFuelTrimBaseline,
+            longTermBaseline: longTermFuelTrimBaseline
+        ) {
+            sections.append(HyperionSection(area: .fuelSystem,
+                                            status: correction.status,
+                                            headline: correction.headline,
+                                            detail: correction.detail,
+                                            comparison: correction.comparison,
+                                            confidence: correction.confidence,
+                                            dataPoints: correction.dataPoints))
+        } else if fuelSystem == .unknown {
             sections.append(.notAssessed(.fuelSystem,
                                          because: "This vehicle is not reporting a fuel system state "
                                                 + "DriveLayer recognises."))

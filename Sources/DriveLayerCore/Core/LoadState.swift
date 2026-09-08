@@ -45,6 +45,10 @@ enum UnavailabilityReason: Equatable, Sendable {
     /// problem: nothing is wrong and there is nothing for the driver to do.
     case waitingForLocationFix
     case diagnosticScanIncomplete
+    case waitingForSensor(String)
+    case staleSensor(String, Date)
+    case rejectedSensor(String)
+    case sensorTemporarilyUnavailable(String)
 
     var title: String {
         switch self {
@@ -63,6 +67,10 @@ enum UnavailabilityReason: Equatable, Sendable {
         case .routeTooShortForForecast: return "Too close to forecast"
         case .waitingForLocationFix: return "Finding your location"
         case .diagnosticScanIncomplete: return "Diagnostic scan incomplete"
+        case let .waitingForSensor(name): return "Waiting for \(name.lowercased())"
+        case let .staleSensor(name, _): return "\(name) reading is stale"
+        case let .rejectedSensor(name): return "\(name) data was rejected"
+        case let .sensorTemporarilyUnavailable(name): return "\(name) is temporarily unavailable"
         }
     }
 
@@ -98,6 +106,14 @@ enum UnavailabilityReason: Equatable, Sendable {
             return "Waiting for a GPS fix. This usually takes a few seconds outdoors."
         case .diagnosticScanIncomplete:
             return "The adapter did not complete every diagnostic request, so DriveLayer cannot confirm that no faults are present."
+        case .waitingForSensor:
+            return "The adapter is connected and DriveLayer is waiting for the ECU's first trusted reading."
+        case let .staleSensor(_, date):
+            return "The last trusted reading was at \(date.formatted(date: .omitted, time: .standard)); it is too old to assess now."
+        case .rejectedSensor:
+            return "The newest sensor frame failed quality checks and was excluded from the assessment."
+        case .sensorTemporarilyUnavailable:
+            return "This signal has not produced a trusted current reading. DriveLayer will retry it."
         }
     }
 }

@@ -16,6 +16,7 @@ struct DebugCenterView: View {
     var body: some View {
         List {
             connectionSection
+            diagnosticSection
             simulatorSection
             capabilitySection
             liveValuesSection
@@ -25,10 +26,56 @@ struct DebugCenterView: View {
             issuesSection
             storageSection
         }
-        .navigationTitle("Debug Center")
+        .navigationTitle("Mechanic Mode")
         .navigationBarTitleDisplayMode(.inline)
         .task { await refresh() }
         .refreshable { await refresh() }
+    }
+
+    private var diagnosticSection: some View {
+        let snapshot = environment.obd.diagnosticSnapshot
+        return Section("Diagnostics") {
+            LabeledContent("Result", value: snapshot.summary)
+            LabeledContent("Coverage", value: String(format: "%.0f%%", snapshot.coverage * 100))
+            LabeledContent("Stored-code scan", value: snapshot.storedStatus.description)
+            LabeledContent("Pending-code scan", value: snapshot.pendingStatus.description)
+            LabeledContent("Permanent-code scan", value: snapshot.permanentStatus.description)
+            if let completed = snapshot.scanCompletedAt {
+                LabeledContent("Scan completed", value: completed.formatted(date: .abbreviated, time: .standard))
+            } else {
+                Text("No completed diagnostic scan timestamp is available.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(DLColor.unknown)
+            }
+            if snapshot.allCodes.isEmpty {
+                Text(snapshot.hasSuccessfulZeroCodeScan
+                     ? "The supported diagnostic requests completed and returned no codes."
+                     : "An empty code list is not treated as a clean scan.")
+                    .font(DL.Font.caption)
+                    .foregroundStyle(snapshot.hasSuccessfulZeroCodeScan ? DLColor.normal : DLColor.unknown)
+            } else {
+                ForEach(snapshot.allCodes, id: \.code) { code in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(code.code).font(DL.Font.body.monospaced().weight(.semibold))
+                        Text(code.status.displayName)
+                            .font(DL.Font.caption)
+                            .foregroundStyle(DLColor.secondaryText)
+                    }
+                }
+            }
+            if let monitor = snapshot.monitorStatus {
+                LabeledContent("Warning light", value: monitor.isWarningLampOn ? "On" : "Off")
+                if let readiness = monitor.readiness {
+                    LabeledContent("Readiness", value: "\(readiness.completeCount) of \(readiness.supportedCount) complete")
+                }
+            } else {
+                LabeledContent("Warning light", value: "Unavailable")
+                LabeledContent("Readiness", value: "Unavailable")
+            }
+            Text("Freeze-frame and Mode 06 results are unavailable until a verified read-only implementation is added.")
+                .font(DL.Font.caption)
+                .foregroundStyle(DLColor.secondaryText)
+        }
     }
 
     private var connectionSection: some View {
@@ -183,6 +230,8 @@ struct DebugCenterView: View {
             let baselines = BaselineEngine.buildAll(from: aggregates, now: Date())
             Section("Baselines") {
                 LabeledContent("Daily aggregates", value: "\(aggregates.count)")
+                LabeledContent("Completed warm-ups",
+                               value: "\(environment.store.warmUpObservations(vehicleID: vehicle.id).count)")
                 if baselines.isEmpty {
                     Text("Not enough history yet.").font(DL.Font.callout).foregroundStyle(DLColor.secondaryText)
                 } else {

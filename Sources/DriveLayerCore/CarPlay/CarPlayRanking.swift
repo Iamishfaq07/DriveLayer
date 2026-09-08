@@ -22,6 +22,7 @@ enum CarPlayTile: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
     case fuelRecommendation
     case fault
     case engine
+    case battery
 }
 
 struct CarPlayRankingInput: Sendable, Equatable {
@@ -50,27 +51,50 @@ struct CarPlayRankingEngine: Sendable {
     }
 
     mutating func rank(_ input: CarPlayRankingInput, at now: Date) -> [CarPlayTile] {
-        if let rankingLockedUntil, now < rankingLockedUntil, !lastRanking.isEmpty {
-            return lastRanking.filter(input.available.contains)
-        }
-
-        let preferred: [CarPlayTile]
-        if input.urgentFault || input.state == .fault {
-            preferred = [.fault, .health, .engine, .currentDrive]
-        } else {
-            switch input.state {
-            case .coldStart: preferred = [.warmUp, .health, .range, .currentDrive]
-            case .highway: preferred = [.health, .economy, .range, .currentDrive]
-            case .climb: preferred = [.health, .engine, .terrain, .range]
-            case .lowFuel: preferred = [.range, .destinationReserve, .fuelRecommendation, .health]
-            case .ordinary: preferred = [.health, .range, .currentDrive, .economy]
-            case .fault: preferred = [.fault, .health, .engine, .currentDrive]
-            }
+        let isUrgent = input.urgentFault || input.state == .fault
+        let preferred = preferredRanking(for: input)
+        if !isUrgent, let rankingLockedUntil, now < rankingLockedUntil, !lastRanking.isEmpty {
+            var held = lastRanking.filter(input.available.contains)
+            held.append(contentsOf: preferred.filter { input.available.contains($0) && !held.contains($0) })
+            lastRanking = held
+            return held
         }
 
         let result = preferred.filter(input.available.contains)
         lastRanking = result
         rankingLockedUntil = now.addingTimeInterval(minimumPresentationLifetime)
         return result
+    }
+
+    private func preferredRanking(for input: CarPlayRankingInput) -> [CarPlayTile] {
+        if input.urgentFault || input.state == .fault {
+            return [.fault, .health, .engine, .battery, .currentDrive]
+        }
+            switch input.state {
+            case .coldStart: return [.warmUp, .health, .range, .battery, .currentDrive]
+            case .highway: return [.health, .economy, .range, .battery, .currentDrive]
+            case .climb: return [.health, .engine, .terrain, .range, .battery]
+            case .lowFuel: return [.range, .destinationReserve, .fuelRecommendation, .health]
+            case .ordinary: return [.health, .range, .currentDrive, .battery, .economy]
+            case .fault: return [.fault, .health, .engine, .battery, .currentDrive]
+            }
+    }
+}
+
+enum CarPlayStateResolver {
+    static func resolve(_ context: InsightContext, insights: [DriveInsight]) -> CarPlayDriveState {
+        if insights.contains(where: { $0.severity >= .attention }) || !context.troubleCodes.isEmpty {
+            return .fault
+        }
+        if context.fuelStatus?.isLow == true { return .lowFuel }
+        if let coolant = context.trustedEntry(.coolantTemperatureC, freshWithin: 60),
+           EngineThermalModel.phase(coolantC: coolant.value, profile: context.profile) != .operating {
+            return .coldStart
+        }
+        if (context.gradient?.percent ?? 0) >= 3 { return .climb }
+        if context.isDriving, (context.trustedEntry(.vehicleSpeedKmh, freshWithin: 15)?.value ?? 0) >= 80 {
+            return .highway
+        }
+        return .ordinary
     }
 }

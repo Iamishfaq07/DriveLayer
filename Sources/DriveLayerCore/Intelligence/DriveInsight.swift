@@ -63,6 +63,15 @@ struct InsightSourceDatum: Sendable, Equatable, Identifiable {
     static func inferred(_ label: String, _ value: String) -> InsightSourceDatum {
         InsightSourceDatum(label: label, formattedValue: value, provenance: .inferred)
     }
+
+    static func learned(_ label: String, _ value: String) -> InsightSourceDatum {
+        InsightSourceDatum(label: label, formattedValue: value, provenance: .learned)
+    }
+
+    static func trustedEntry(_ label: String, _ value: String,
+                             entry: VehicleTelemetry.Entry) -> InsightSourceDatum {
+        InsightSourceDatum(label: label, formattedValue: value, provenance: entry.provenance)
+    }
 }
 
 /// A single thing DriveLayer has to say.
@@ -208,6 +217,21 @@ struct InsightContext: Sendable {
 
     func value(_ metric: VehicleMetric, freshWithin interval: TimeInterval = 30) -> Double? {
         telemetry?.trustedValue(metric, freshWithin: interval, now: now)
+    }
+
+    func trustedEntry(_ metric: VehicleMetric,
+                      freshWithin interval: TimeInterval = 30) -> VehicleTelemetry.Entry? {
+        telemetry?.trustedEntry(metric, freshWithin: interval, now: now)
+    }
+
+    func trustedReading(_ metric: VehicleMetric,
+                        freshWithin interval: TimeInterval = 30) -> Provenanced<Double> {
+        telemetry?.provenancedTrustedReading(metric, freshWithin: interval, now: now)
+            ?? .unavailable(basis: "No telemetry is available.")
+    }
+
+    func lastKnownEntry(_ metric: VehicleMetric) -> VehicleTelemetry.Entry? {
+        telemetry?.lastKnownEntry(metric)
     }
 }
 

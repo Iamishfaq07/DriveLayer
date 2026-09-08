@@ -40,6 +40,23 @@ struct BaselineObservationCollector {
             }
         }
 
+        // Fuel correction is comparable only in closed loop after warm-up, at steady
+        // road speed and moderate load. Open-loop and transient samples would teach a
+        // normal range from values the ECU is not actively using.
+        if context == .cruising,
+           let coolant = telemetry.trustedValue(.coolantTemperatureC, freshWithin: 30, now: now), coolant >= 80,
+           let rpm = telemetry.trustedValue(.engineRPM, freshWithin: 10, now: now), (700...3_500).contains(rpm),
+           let load = telemetry.trustedValue(.engineLoadPercent, freshWithin: 10, now: now), (10...60).contains(load),
+           let loop = telemetry.trustedValue(.fuelSystemStatusCode, freshWithin: 10, now: now),
+           FuelSystemStatus.decode(code: loop).allowsFuelTrimComparison {
+            for metric in [VehicleMetric.shortTermFuelTrimPercent, .longTermFuelTrimPercent] {
+                guard let entry = telemetry.trustedEntry(metric, freshWithin: 10, now: now),
+                      entry.provenance == .measured,
+                      isNew(metric, timestamp: entry.timestamp) else { continue }
+                add(metric, context: .cruising, value: entry.value, at: entry.timestamp, into: &aggregates)
+            }
+        }
+
         // Only compare warmed intake deltas with the same operating context.
         guard context != .engineOff, context != .coldEngine,
               let intake = telemetry.trustedEntry(.intakeAirTemperatureC, freshWithin: 30, now: now),

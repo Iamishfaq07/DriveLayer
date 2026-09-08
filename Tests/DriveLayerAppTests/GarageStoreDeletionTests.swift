@@ -98,6 +98,41 @@ final class GarageStoreDeletionTests: XCTestCase {
         }
     }
 
+    func testAdaptersAreScopedToVehicleAndKeepSeparatePreferences() throws {
+        let first = makeVehicle("First")
+        let second = makeVehicle("Second")
+        store.add(vehicle: first)
+        store.add(vehicle: second)
+        let firstAdapter = UUID().uuidString
+        let secondAdapter = UUID().uuidString
+
+        store.rememberAdapter(vehicleID: first.id, deviceIdentifier: firstAdapter,
+                              name: "First adapter", adapter: "ELM", protocolDescription: "CAN")
+        store.rememberAdapter(vehicleID: second.id, deviceIdentifier: secondAdapter,
+                              name: "Second adapter", adapter: "ELM", protocolDescription: "CAN")
+
+        XCTAssertEqual(store.preferredAdapter(vehicleID: first.id)?.deviceIdentifier, firstAdapter)
+        XCTAssertEqual(store.preferredAdapter(vehicleID: second.id)?.deviceIdentifier, secondAdapter)
+        XCTAssertEqual(store.rememberedAdapters(vehicleID: first.id).count, 1)
+        XCTAssertEqual(store.rememberedAdapters(vehicleID: second.id).count, 1)
+    }
+
+    func testDeletingVehicleDeletesOnlyItsAdapterRelationships() throws {
+        let keep = makeVehicle("Keep")
+        let remove = makeVehicle("Remove")
+        store.add(vehicle: keep)
+        store.add(vehicle: remove)
+        store.rememberAdapter(vehicleID: keep.id, deviceIdentifier: UUID().uuidString,
+                              name: "Keep", adapter: nil, protocolDescription: nil)
+        store.rememberAdapter(vehicleID: remove.id, deviceIdentifier: UUID().uuidString,
+                              name: "Remove", adapter: nil, protocolDescription: nil)
+
+        store.delete(vehicleID: remove.id)
+
+        XCTAssertEqual(store.rememberedAdapters(vehicleID: keep.id).count, 1)
+        XCTAssertTrue(store.rememberedAdapters(vehicleID: remove.id).isEmpty)
+    }
+
     func testDeletingASingleDocumentRemovesItsFile() throws {
         let vehicle = makeVehicle()
         store.add(vehicle: vehicle)

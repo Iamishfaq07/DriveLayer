@@ -134,6 +134,8 @@ final class GarageStore {
             try context.delete(model: StoredServiceRecord.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredRoadEvent.self, where: #Predicate { $0.vehicleID == vehicleID })
+            try context.delete(model: StoredWarmUpObservation.self, where: #Predicate { $0.vehicleID == vehicleID })
+            try context.delete(model: StoredVehicleAdapter.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredDocument.self, where: #Predicate { $0.vehicleID == optionalVehicleID })
             try context.delete(model: StoredVehicle.self, where: #Predicate { $0.id == vehicleID })
         }
@@ -365,6 +367,65 @@ final class GarageStore {
                          description: "Loading road events") { try $0.value() }
     }
 
+    func rememberedAdapters(vehicleID: UUID) -> [StoredVehicleAdapter] {
+        let descriptor = FetchDescriptor<StoredVehicleAdapter>(
+            predicate: #Predicate { $0.vehicleID == vehicleID },
+            sortBy: [SortDescriptor(\.lastConnectedAt, order: .reverse)]
+        )
+        return fetch(descriptor, description: "Loading vehicle adapters")
+    }
+
+    func rememberAdapter(vehicleID: UUID, deviceIdentifier: String, name: String,
+                         adapter: String?, protocolDescription: String?) {
+        let key = "\(vehicleID.uuidString)|\(deviceIdentifier)"
+        let descriptor = FetchDescriptor<StoredVehicleAdapter>(predicate: #Predicate { $0.identifier == key })
+        perform("Saving the vehicle adapter") {
+            for record in try context.fetch(FetchDescriptor<StoredVehicleAdapter>(
+                predicate: #Predicate { $0.vehicleID == vehicleID })) {
+                record.isPreferred = false
+            }
+            let record: StoredVehicleAdapter
+            if let existing = try context.fetch(descriptor).first {
+                record = existing
+                record.name = name
+                record.lastConnectedAt = Date()
+            } else {
+                record = StoredVehicleAdapter(vehicleID: vehicleID, deviceIdentifier: deviceIdentifier,
+                                              name: name, lastConnectedAt: Date())
+                context.insert(record)
+            }
+            record.adapterDescription = adapter
+            record.protocolDescription = protocolDescription
+            record.isPreferred = true
+        }
+    }
+
+    func preferredAdapter(vehicleID: UUID) -> StoredVehicleAdapter? {
+        rememberedAdapters(vehicleID: vehicleID).first { $0.isPreferred }
+            ?? rememberedAdapters(vehicleID: vehicleID).first
+    }
+
+    // MARK: - Warm-up learning
+
+    func warmUpObservations(vehicleID: UUID, limit: Int = 60) -> [WarmUpObservation] {
+        var descriptor = FetchDescriptor<StoredWarmUpObservation>(
+            predicate: #Predicate { $0.vehicleID == vehicleID },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        return decodeAll(fetch(descriptor, description: "Loading warm-up history"),
+                         description: "Loading warm-up history") { try $0.value() }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    func add(warmUp observation: WarmUpObservation, vehicleID: UUID) {
+        let history = warmUpObservations(vehicleID: vehicleID)
+        guard EngineThermalModel.record(observation, into: history).count > history.count else { return }
+        perform("Saving warm-up observation") {
+            context.insert(try StoredWarmUpObservation(vehicleID: vehicleID, observation: observation))
+        }
+    }
+
     // MARK: - Privacy controls
 
     /// Removes every record the app holds. Backs "Delete all data" in settings.
@@ -377,7 +438,9 @@ final class GarageStore {
             try context.delete(model: StoredDocument.self)
             try context.delete(model: StoredBaselineAggregate.self)
             try context.delete(model: StoredRoadEvent.self)
+            try context.delete(model: StoredWarmUpObservation.self)
             try context.delete(model: StoredOBDDevice.self)
+            try context.delete(model: StoredVehicleAdapter.self)
             try context.delete(model: StoredVehicle.self)
         }
         TelemetryFileStore.shared.deleteEverything()
@@ -397,6 +460,7 @@ final class GarageStore {
             /// Included because these carry coordinates. An export that quietly left
             /// out a location-bearing record type would not be the whole truth.
             var roadEvents: [RoadImpactEvent]
+            var warmUpObservations: [WarmUpObservation]
         }
         let bundle = ExportBundle(exportedAt: Date(),
                                   vehicle: vehicles().first { $0.id == vehicleID },
@@ -405,7 +469,8 @@ final class GarageStore {
                                   maintenanceItems: maintenanceItems(vehicleID: vehicleID),
                                   serviceRecords: serviceRecords(vehicleID: vehicleID),
                                   documents: documents(vehicleID: vehicleID),
-                                  roadEvents: roadEvents(vehicleID: vehicleID))
+                                  roadEvents: roadEvents(vehicleID: vehicleID),
+                                  warmUpObservations: warmUpObservations(vehicleID: vehicleID))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

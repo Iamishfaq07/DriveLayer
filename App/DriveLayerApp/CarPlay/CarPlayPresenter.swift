@@ -29,9 +29,10 @@ final class CarPlayPresenter {
 
     private let interfaceController: CPInterfaceController
     private var refreshTimer: Timer?
+    private var rankingEngine = CarPlayRankingEngine(minimumPresentationLifetime: 20)
 
-    private let vehicleGrid = CPGridTemplate(title: "Vehicle", gridButtons: [])
-    private let tripGrid = CPGridTemplate(title: "Trip", gridButtons: [])
+    private let vehicleGrid = CPGridTemplate(title: "Now", gridButtons: [])
+    private let tripGrid = CPGridTemplate(title: "Drive", gridButtons: [])
     private let aheadGrid = CPGridTemplate(title: "Ahead", gridButtons: [])
     private let copilotList = CPListTemplate(title: "Ask", sections: [])
 
@@ -46,7 +47,7 @@ final class CarPlayPresenter {
     /// Speech capture for the voice entry point. On-device only, and it refuses to
     /// listen at all on a phone that cannot recognise speech locally.
     private let voice = VoiceCapture()
-    private static let listeningStateIdentifier = "listening"
+    private var voiceTemplate: CPVoiceControlTemplate?
 
     /// CarPlay connects on its own scene, so it needs a reference to the running app's
     /// state. This is the one place a shared instance is justified.
@@ -57,10 +58,10 @@ final class CarPlayPresenter {
     }
 
     func start() {
-        vehicleGrid.tabTitle = "Vehicle"
+        vehicleGrid.tabTitle = "Now"
         vehicleGrid.tabImage = UIImage(systemName: "car.fill")
 
-        tripGrid.tabTitle = "Trip"
+        tripGrid.tabTitle = "Drive"
         tripGrid.tabImage = UIImage(systemName: "speedometer")
 
         aheadGrid.tabTitle = "Ahead"
@@ -86,6 +87,7 @@ final class CarPlayPresenter {
         refreshTimer = nil
         // The car is gone; a microphone still open would have nothing to show for it.
         voice.cancel()
+        voiceTemplate = nil
     }
 
     // MARK: - Building
@@ -111,46 +113,71 @@ final class CarPlayPresenter {
 
     private func vehicleButtons(_ environment: AppEnvironment) -> [CPGridButton] {
         let drive = environment.drive
-        var buttons: [CPGridButton] = []
+        var candidates: [(CarPlayTile, CPGridButton)] = []
 
         // Urgent first: if something needs attention, it leads, and its shape encodes
         // severity rather than topic - that is the one axis that matters most here.
         if let insight = InsightEngine.headline(drive.insights), insight.severity >= .watch {
-            buttons.append(CPGridButton(titleVariants: [insight.title],
+            candidates.append((.fault, CPGridButton(titleVariants: [insight.title],
                                         image: statusShapeImage(insight.severity)) { [weak self] _ in
                 self?.presentInformation(title: insight.title,
                                          lines: [insight.summary, insight.details, insight.recommendedAction].compactMap { $0 })
-            })
+            }))
         }
 
         let health = drive.health
-        buttons.append(CPGridButton(titleVariants: [health?.overall.label ?? "No data"],
+        candidates.append((.health, CPGridButton(titleVariants: [health?.headline ?? "Not enough data"],
                                     image: tileImage(symbolName: InsightCategory.vehicle.symbolName,
                                                      status: health?.overall)) { [weak self] _ in
             self?.presentInformation(title: "Vehicle",
                                      lines: [health.map { "\($0.overall.label) — \($0.headline)" } ?? "Not enough data yet."])
-        })
+        }))
 
         // Same battery reading the health screen and "How's the battery" already use -
         // this is not a new judgment, just a new place to glance at the existing one.
         if let battery = health?.system(.battery), battery.status != .unknown {
-            buttons.append(CPGridButton(titleVariants: [battery.headline],
+            candidates.append((.battery, CPGridButton(titleVariants: [battery.headline],
                                         image: tileImage(symbolName: InsightCategory.battery.symbolName,
                                                          status: battery.status)) { [weak self] _ in
                 self?.presentInformation(title: "Battery", lines: [battery.headline, battery.detail].compactMap { $0 })
-            })
+            }))
         }
 
         if !drive.hyperion.isSilent {
             let hyperion = drive.hyperion
-            buttons.append(CPGridButton(titleVariants: [hyperion.overall.label],
+            let thermal = drive.carPlayInsightContext().trustedEntry(.coolantTemperatureC, freshWithin: 60)
+            let tile: CarPlayTile = thermal.map {
+                EngineThermalModel.phase(coolantC: $0.value, profile: drive.profile) == .operating ? .engine : .warmUp
+            } ?? .engine
+            candidates.append((tile, CPGridButton(titleVariants: [hyperion.overall.label],
                                         image: tileImage(symbolName: "engine.combustion.fill",
                                                          status: hyperion.overall)) { [weak self] _ in
                 self?.presentInformation(title: "Hyperion", lines: [hyperion.overall.label])
-            })
+            }))
         }
 
-        return buttons
+        if let range = drive.fuelStatus.estimatedRangeKm.value {
+            let title = "~\(Int(range.rounded())) km range"
+            candidates.append((.range, CPGridButton(titleVariants: [title],
+                                                     image: tileImage(symbolName: "fuelpump", status: nil)) { [weak self] _ in
+                self?.presentInformation(title: "Estimated range", lines: [title])
+            }))
+        }
+        if let trip = drive.currentTrip {
+            let kilometres = trip.distanceMetres / 1_000
+            candidates.append((.currentDrive, CPGridButton(titleVariants: [String(format: "%.1f km this drive", kilometres)],
+                                                            image: tileImage(symbolName: "road.lanes", status: nil)) { [weak self] _ in
+                self?.presentInformation(title: "Current drive", lines: [String(format: "%.1f km so far", kilometres)])
+            }))
+        }
+
+        let context = drive.carPlayInsightContext()
+        let state = CarPlayStateResolver.resolve(context, insights: drive.insights)
+        let available = Set(candidates.map(\.0))
+        let ranked = rankingEngine.rank(.init(state: state, available: available,
+                                              urgentFault: drive.insights.contains { $0.severity >= .attention }),
+                                               at: context.now)
+        return ranked.compactMap { tile in candidates.first { $0.0 == tile }?.1 }
     }
 
     // MARK: - Trip tab
@@ -162,6 +189,16 @@ final class CarPlayPresenter {
         let drive = environment.drive
         let formatter = environment.formatter
         var buttons: [CPGridButton] = []
+
+        if let trip = drive.currentTrip {
+            let distance = formatter.distance(kilometres: trip.distanceMetres / 1_000, fractionDigits: 1) ?? "—"
+            let duration = formatter.duration(seconds: trip.movingDurationSeconds + trip.idleDurationSeconds) ?? "—"
+            buttons.append(CPGridButton(titleVariants: ["\(distance) \(formatter.distanceUnitLabel)"],
+                                        image: tileImage(symbolName: "road.lanes", status: nil)) { [weak self] _ in
+                self?.presentInformation(title: "Current drive",
+                                         lines: ["\(distance) \(formatter.distanceUnitLabel) · \(duration)"])
+            })
+        }
 
         let rangeKm = drive.fuelStatus.estimatedRangeKm.value
         let rangeText = formatter.distance(kilometres: rangeKm, fractionDigits: 0)
@@ -175,7 +212,8 @@ final class CarPlayPresenter {
 
         // The same snapshot the widgets and Siri read - written once per analysis
         // pass, not recomputed here, so this tile can never disagree with them.
-        if let snapshot = WidgetSnapshotStore.read(), let distanceKm = snapshot.lastTripDistanceKm {
+        if drive.currentTrip == nil,
+           let snapshot = WidgetSnapshotStore.read(), let distanceKm = snapshot.lastTripDistanceKm {
             let distanceText = formatter.distance(kilometres: distanceKm, fractionDigits: 1) ?? "—"
             let detail = [formatter.duration(seconds: snapshot.lastTripDurationSeconds),
                           formatter.economy(kmPerLitre: snapshot.lastTripEconomyKmPerLitre).map { "\($0) \(formatter.economyUnitLabel)" }]
@@ -303,7 +341,8 @@ final class CarPlayPresenter {
         // Speaking comes first because it is the only entry here that takes a question
         // this list does not already contain.
         if #available(iOS 27.0, *) {
-            let speak = CPListItem(text: "Ask a question", detailText: "Speak to Harrier")
+            let vehicleName = environment?.drive.vehicle?.nickname ?? "your vehicle"
+            let speak = CPListItem(text: "Ask a question", detailText: "Speak to \(vehicleName)")
             speak.handler = { [weak self] _, completion in
                 self?.listen()
                 completion()
@@ -348,21 +387,28 @@ final class CarPlayPresenter {
     @available(iOS 27.0, *)
     private func listen() {
         guard let environment else { return }
-        let listening = CPVoiceControlState(identifier: Self.listeningStateIdentifier,
-                                            titleVariants: ["Listening…", "Listening"],
-                                            image: nil,
-                                            repeats: false)
-        let template = CPVoiceControlTemplate(voiceControlStates: [listening])
+        let states = CarPlayVoiceState.allCases.map {
+            CPVoiceControlState(identifier: $0.rawValue,
+                                titleVariants: $0.titleVariants,
+                                image: nil,
+                                repeats: false)
+        }
+        let template = CPVoiceControlTemplate(voiceControlStates: states)
+        voiceTemplate = template
         interfaceController.presentTemplate(template, animated: true, completion: nil)
 
         Task { @MainActor in
             let unavailable = await voice.start { [weak self] transcript in
+                self?.voiceTemplate?.activateVoiceControlState(withIdentifier: CarPlayVoiceState.understanding.rawValue)
                 self?.answerSpoken(transcript, environment: environment)
+            } onFailure: { [weak self] failure in
+                self?.finishVoiceInteraction(title: "Couldn't hear you", message: failure.message)
             }
             if let unavailable {
                 // Nothing is listening, so the template would be a lie. Take it down
                 // and say why in the same breath.
                 interfaceController.dismissTemplate(animated: true, completion: nil)
+                voiceTemplate = nil
                 presentInformation(title: "Can't listen", lines: [unavailable.message])
             }
         }
@@ -379,10 +425,19 @@ final class CarPlayPresenter {
         let snapshot = environment.drive.copilotSnapshot()
         Task { @MainActor in
             let answer = try? await FoundationModelsCopilot().answer(question: question, snapshot: snapshot)
+            voiceTemplate?.activateVoiceControlState(withIdentifier: CarPlayVoiceState.answering.rawValue)
             interfaceController.dismissTemplate(animated: true, completion: nil)
+            voiceTemplate = nil
             presentInformation(title: question,
                                lines: [answer?.spokenText ?? "I couldn't work that one out. Try one of the questions in the list."])
         }
+    }
+
+    @available(iOS 27.0, *)
+    private func finishVoiceInteraction(title: String, message: String) {
+        interfaceController.dismissTemplate(animated: true, completion: nil)
+        voiceTemplate = nil
+        presentInformation(title: title, lines: [message])
     }
 
     // MARK: - Critical alert

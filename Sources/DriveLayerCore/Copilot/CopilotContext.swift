@@ -120,6 +120,7 @@ struct VehicleContextSnapshot: Sendable, Equatable {
     var recentInsights: [String] = []
     var activeTroubleCodes: [String] = []
     var diagnosticsSummary: String = "Diagnostics unavailable"
+    var diagnosticSnapshot: DiagnosticSnapshot = DiagnosticSnapshot()
     var batteryBaselineV: Double?
     var batteryTrendVPerWindow: Double?
     var isDriving: Bool = false
@@ -204,6 +205,7 @@ enum CopilotContextBuilder {
             recentInsights: insights.prefix(5).map { "\($0.title): \($0.summary)" },
             activeTroubleCodes: context.troubleCodes.map(\.code),
             diagnosticsSummary: context.diagnosticSnapshot.summary,
+            diagnosticSnapshot: context.diagnosticSnapshot,
             batteryBaselineV: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.median,
             batteryTrendVPerWindow: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.trendOverWindow,
             isDriving: context.isDriving

@@ -69,6 +69,10 @@ struct DLUnavailableState: View {
         case .routeTooShortForForecast: return "arrow.right.to.line"
         case .waitingForLocationFix: return "location.magnifyingglass"
         case .diagnosticScanIncomplete: return "stethoscope"
+        case .waitingForSensor: return "hourglass"
+        case .staleSensor: return "clock.badge.exclamationmark"
+        case .rejectedSensor: return "waveform.badge.exclamationmark"
+        case .sensorTemporarilyUnavailable: return "arrow.clockwise"
         }
     }
 }

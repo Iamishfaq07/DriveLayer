@@ -73,6 +73,8 @@ final class DriveSessionCoordinator {
     private var baselineCollector = BaselineObservationCollector()
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
+    private var warmUpHistory: [WarmUpObservation] = []
+    private var warmUpTracker = WarmUpSessionTracker()
 
     /// Impacts already taken from `MotionService`, so the same jolt is not recorded
     /// twice as the loop re-reads its rolling buffer.
@@ -207,6 +209,8 @@ final class DriveSessionCoordinator {
         peakIntakeDeltaC = nil
         insights.removeAll()
         baselines = [:]
+        warmUpTracker.reset()
+        warmUpHistory = vehicle.map { store.warmUpObservations(vehicleID: $0.id) } ?? []
         recorder = vehicle.map { makeRecorder(for: $0) }
         reloadBaselines()
         recoverInterruptedTrips()
@@ -361,6 +365,7 @@ final class DriveSessionCoordinator {
         if isRecording, let telemetry {
             collectTelemetry(telemetry, at: now)
         }
+        collectWarmUpObservation(from: telemetry, at: now)
         collectRoadImpacts(into: &recorder)
         self.recorder = recorder
         checkpoint(now: now)
@@ -515,6 +520,9 @@ final class DriveSessionCoordinator {
             peakIntakeDeltaC = HeatSoakAnalyser.updatedPeak(current: peakIntakeDeltaC,
                                                            delta: intakeValue - ambient)
         }
+        let baselineContext = BaselineObservationCollector.context(
+            telemetry: obd.telemetry, now: now, gradientPercent: gradient?.percent
+        )
 
         return HyperionGuardian.assess(
             coolantC: provenancedReading(.coolantTemperatureC, freshWithin: 60, now: now),
@@ -526,15 +534,19 @@ final class DriveSessionCoordinator {
             idleSeconds: currentTrip?.idleDurationSeconds,
             runtimeSeconds: currentTrip.map { now.timeIntervalSince($0.startedAt) },
             peakIntakeDeltaC: peakIntakeDeltaC,
-            // Warm-up history is not stored per drive yet; that is its own P1 item, and
-            // passing an empty history simply means no comparison is offered rather than
-            // a comparison being invented.
-            warmUpHistory: [],
+            warmUpHistory: warmUpHistory,
             intakeDeltaBaseline: BaselineObservationCollector.context(telemetry: obd.telemetry, now: now,
                                                                        gradientPercent: gradient?.percent)
                 .flatMap { baselines[BaselineKey(metric: .intakeAmbientDeltaC, context: $0)] },
             fuelSystem: obd.telemetry.trustedValue(.fuelSystemStatusCode, freshWithin: 30, now: now)
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
+            shortTermFuelTrim: provenancedReading(.shortTermFuelTrimPercent, freshWithin: 15, now: now),
+            longTermFuelTrim: provenancedReading(.longTermFuelTrimPercent, freshWithin: 15, now: now),
+            isWarmedCruise: baselineContext == .cruising,
+            shortTermFuelTrimBaseline: baselines[BaselineKey(metric: .shortTermFuelTrimPercent,
+                                                              context: .cruising)],
+            longTermFuelTrimBaseline: baselines[BaselineKey(metric: .longTermFuelTrimPercent,
+                                                             context: .cruising)],
             // The structured read first, because only it carries readiness. The telemetry
             // value is the fallback: it is refreshed far more often, so it is the one that
             // notices a lamp coming on between diagnostic reads.
@@ -558,6 +570,27 @@ final class DriveSessionCoordinator {
 
         baselineCollector.collect(telemetry, at: now, gradientPercent: gradient?.percent,
                                   into: &pendingBaselines)
+    }
+
+    private func collectWarmUpObservation(from telemetry: VehicleTelemetry?, at now: Date) {
+        guard let vehicle, let telemetry, obd.source?.isSimulated != true else {
+            warmUpTracker.reset()
+            return
+        }
+        let coolant = telemetry.provenancedTrustedReading(.coolantTemperatureC, freshWithin: 10, now: now)
+        let ambient = telemetry.provenancedTrustedReading(.ambientAirTemperatureC, freshWithin: 300, now: now)
+        if let observation = warmUpTracker.ingest(
+            at: now,
+            coolant: coolant,
+            ambient: ambient,
+            rpm: telemetry.trustedValue(.engineRPM, freshWithin: 10, now: now),
+            speedKmh: telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 10, now: now),
+            engineRunning: telemetry.isEngineRunning(now: now),
+            profile: profile
+        ) {
+            warmUpHistory = EngineThermalModel.record(observation, into: warmUpHistory)
+            store.add(warmUp: observation, vehicleID: vehicle.id)
+        }
     }
 
     /// Writes the live drive and its telemetry to disk.
@@ -705,6 +738,32 @@ final class DriveSessionCoordinator {
     }
 
     /// Builds the copilot's snapshot from the same context the insights came from.
+    func carPlayInsightContext(now: Date = Date()) -> InsightContext {
+        InsightContext(now: now,
+                       vehicle: vehicle,
+                       profile: profile,
+                       isAdapterConnected: obd.isConnected,
+                       telemetry: obd.isConnected ? obd.telemetry : nil,
+                       capabilities: obd.capabilities,
+                       currentTrip: currentTrip,
+                       recentTrips: vehicle.map { store.trips(vehicleID: $0.id, limit: 60) } ?? [],
+                       baselines: baselines,
+                       gradient: gradient,
+                       terrainFeature: terrainFeature,
+                       currentWeather: currentWeather,
+                       weatherChanges: weatherChanges,
+                       troubleCodes: obd.troubleCodes,
+                       diagnosticSnapshot: obd.diagnosticSnapshot,
+                       maintenanceStatuses: vehicle.map {
+                           MaintenanceEngine.statuses(for: store.maintenanceItems(vehicleID: $0.id),
+                                                      currentOdometerKm: $0.odometerKm, now: now)
+                       } ?? [],
+                       documents: vehicle.map { store.documents(vehicleID: $0.id) } ?? [],
+                       fuelStatus: fuelStatus,
+                       dieselAssessment: dieselAssessment,
+                       isDriving: isRecording)
+    }
+
     func copilotSnapshot() -> VehicleContextSnapshot {
         guard let vehicle else {
             return VehicleContextSnapshot(generatedAt: Date())

@@ -89,7 +89,7 @@ final class TelemetryTrustRegressionTests: XCTestCase {
     }
 
     func testCollectorRejectsSuspectSimulatedEstimatedAndStaleInputs() {
-        for provenance in [DataProvenance.simulated, .estimated, .inferred, .userEntered] {
+        for provenance in [DataProvenance.simulated, .estimated, .inferred, .learned, .userEntered] {
             var t = warmedTelemetry()
             t.set(.coolantTemperatureC, value: 90, at: now, provenance: provenance)
             var collector = BaselineObservationCollector()
@@ -109,6 +109,31 @@ final class TelemetryTrustRegressionTests: XCTestCase {
         var aggregates: [BaselineDailyAggregate] = []
         collector.collect(suspect, at: now, gradientPercent: nil, into: &aggregates)
         XCTAssertFalse(aggregates.contains { $0.key.metric == .intakeAmbientDeltaC })
+    }
+
+    func testInsightContextKeepsTrustedTimestampAndProvenance() throws {
+        let sampledAt = now.addingTimeInterval(-12)
+        for provenance in [DataProvenance.measured, .estimated, .simulated] {
+            var telemetry = VehicleTelemetry(updatedAt: sampledAt)
+            telemetry.set(.coolantTemperatureC, value: 88, at: sampledAt, provenance: provenance)
+            let context = InsightContext(now: now, telemetry: telemetry)
+            let entry = try XCTUnwrap(context.trustedEntry(.coolantTemperatureC, freshWithin: 30))
+            XCTAssertEqual(entry.timestamp, sampledAt)
+            XCTAssertEqual(entry.provenance, provenance)
+            let reading = context.trustedReading(.coolantTemperatureC, freshWithin: 30)
+            XCTAssertEqual(reading.timestamp, sampledAt)
+            XCTAssertEqual(reading.provenance, provenance)
+        }
+    }
+
+    func testInsightEvidenceUsesSensorAndLearnedProvenance() {
+        var telemetry = VehicleTelemetry(updatedAt: now)
+        telemetry.set(.coolantTemperatureC, value: 90, at: now, provenance: .simulated)
+        let context = InsightContext(now: now, profile: VehicleProfileCatalog.harrier2026AdventureXPlus,
+                                     isAdapterConnected: true, telemetry: telemetry)
+        let report = VehicleHealthEvaluator.evaluate(context)
+        XCTAssertEqual(report.system(.engine)?.dataPoints.first?.provenance, .simulated)
+        XCTAssertEqual(InsightSourceDatum.learned("Typical", "90 °C").provenance, .learned)
     }
 
     func testNoEngineEvidenceDoesNotTeachWarmedBaseline() {

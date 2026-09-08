@@ -32,9 +32,9 @@ enum OBDError: Error, Equatable, Sendable {
     /// True when retrying the exact same request could reasonably succeed.
     var isTransient: Bool {
         switch self {
-        case .timeout, .busError, .bufferFull, .stopped, .connectionLost:
+        case .timeout, .noData, .busError, .bufferFull, .stopped, .connectionLost:
             return true
-        case .notConnected, .connectionFailed, .noData, .unrecognisedCommand,
+        case .notConnected, .connectionFailed, .unrecognisedCommand,
              .unableToConnectToVehicle, .negativeResponse, .mismatchedResponse,
              .malformedResponse, .pidNotSupported, .noDecoderAvailable:
             return false
@@ -44,7 +44,7 @@ enum OBDError: Error, Equatable, Sendable {
     /// Whether this outcome means "stop asking for this PID on this vehicle".
     var suggestsUnsupported: Bool {
         switch self {
-        case .noData, .pidNotSupported, .negativeResponse, .noDecoderAvailable:
+        case .pidNotSupported, .noDecoderAvailable:
             return true
         default:
             return false

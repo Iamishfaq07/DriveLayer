@@ -20,6 +20,20 @@ import AVFoundation
 @MainActor
 final class VoiceCapture {
 
+    enum Failure: Equatable {
+        case timeout
+        case recognitionFailed
+
+        var message: String {
+            switch self {
+            case .timeout:
+                return "I didn't hear a complete question. Please try again."
+            case .recognitionFailed:
+                return "I couldn't understand that. Please try again or tap a question."
+            }
+        }
+    }
+
     enum Unavailable: Equatable {
         case notPermitted
         case speechNotAuthorised
@@ -49,6 +63,7 @@ final class VoiceCapture {
     #endif
 
     private var onTranscript: ((String) -> Void)?
+    private var onFailure: ((Failure) -> Void)?
     private var stopWorkItem: DispatchWorkItem?
     private(set) var isListening = false
 
@@ -84,11 +99,13 @@ final class VoiceCapture {
     ///   is worse than one that waits.
     @discardableResult
     func start(maximumDuration: TimeInterval = 10,
-               onTranscript: @escaping (String) -> Void) async -> Unavailable? {
+               onTranscript: @escaping (String) -> Void,
+               onFailure: @escaping (Failure) -> Void) async -> Unavailable? {
         if let unavailable = await availability() { return unavailable }
         #if canImport(Speech) && canImport(AVFoundation)
         guard !isListening, let recogniser else { return .failedToStart }
         self.onTranscript = onTranscript
+        self.onFailure = onFailure
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = false
@@ -122,7 +139,7 @@ final class VoiceCapture {
                 if let result, result.isFinal {
                     self.finish(with: result.bestTranscription.formattedString)
                 } else if error != nil {
-                    self.finish(with: nil)
+                    self.fail(.recognitionFailed)
                 }
             }
         }
@@ -130,7 +147,7 @@ final class VoiceCapture {
         // A hard ceiling, because a tap that never ends is a microphone left open in
         // someone's car.
         let timeout = DispatchWorkItem { [weak self] in
-            Task { @MainActor in self?.endAudio() }
+            Task { @MainActor in self?.fail(.timeout) }
         }
         stopWorkItem = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + maximumDuration, execute: timeout)
@@ -161,6 +178,7 @@ final class VoiceCapture {
         task = nil
         request = nil
         onTranscript = nil
+        onFailure = nil
         isListening = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
@@ -171,5 +189,11 @@ final class VoiceCapture {
         let text = transcript?.trimmingCharacters(in: .whitespacesAndNewlines)
         cancel()
         if let text, !text.isEmpty { handler?(text) }
+    }
+
+    private func fail(_ failure: Failure) {
+        let handler = onFailure
+        cancel()
+        handler?(failure)
     }
 }

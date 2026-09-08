@@ -82,7 +82,7 @@ struct SettingsView: View {
                     Label("What DriveLayer can see", systemImage: "info.circle")
                 }
                 NavigationLink(destination: DebugCenterView()) {
-                    Label("Debug Center", systemImage: "hammer")
+                    Label("Mechanic Mode", systemImage: "wrench.and.screwdriver")
                 }
             }
         }
