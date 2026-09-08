@@ -41,15 +41,20 @@ struct VehicleHealthSystem: Sendable, Equatable, Identifiable {
 }
 
 struct VehicleHealthReport: Sendable, Equatable {
+    enum AssessmentCoverage: String, Sendable, Equatable, Codable {
+        case full, partial, limited, unavailable
+    }
+
     var overall: SemanticStatus
     var systems: [VehicleHealthSystem]
     var generatedAt: Date
     /// True when at least one system could not be assessed.
     var isLimitedByMissingData: Bool
+    var coverage: AssessmentCoverage = .unavailable
 
     var headline: String {
         switch overall {
-        case .normal: return "Healthy"
+        case .normal: return coverage == .full ? "Healthy" : "Assessed systems look normal"
         case .watch: return "Watch"
         case .attention: return "Attention"
         case .critical: return "Attention needed"
@@ -79,11 +84,18 @@ enum VehicleHealthEvaluator {
         // overall verdict is qualified rather than a confident "healthy".
         let assessed = systems.map(\.status).filter { $0 != .unknown }
         let overall = assessed.isEmpty ? .unknown : SemanticStatus.rollUp(assessed)
+        let assessedCount = assessed.count
+        let coverage: VehicleHealthReport.AssessmentCoverage
+        if assessedCount == 0 { coverage = .unavailable }
+        else if assessedCount == systems.count { coverage = .full }
+        else if assessedCount >= max(1, systems.count / 2) { coverage = .partial }
+        else { coverage = .limited }
 
         return VehicleHealthReport(overall: overall,
                                    systems: systems,
                                    generatedAt: context.now,
-                                   isLimitedByMissingData: systems.contains { $0.status == .unknown })
+                                   isLimitedByMissingData: systems.contains { $0.status == .unknown },
+                                   coverage: coverage)
     }
 
     private static func engine(_ context: InsightContext) -> VehicleHealthSystem {
@@ -93,18 +105,21 @@ enum VehicleHealthEvaluator {
                                        detail: nil, dataPoints: [],
                                        unavailability: .obdNotConnected)
         }
-        guard let coolant = context.value(.coolantTemperatureC, freshWithin: 300) else {
+        guard case let .available(coolantEntry) = context.availability(.coolantTemperatureC, freshWithin: 300) else {
+            let unavailable = sensorUnavailable(context.availability(.coolantTemperatureC, freshWithin: 300),
+                                                name: "Coolant temperature")
             return VehicleHealthSystem(kind: .engine, status: .unknown,
-                                       headline: "This vehicle doesn't report coolant temperature",
+                                       headline: unavailable.headline,
                                        detail: nil, dataPoints: [],
-                                       unavailability: .pidNotSupportedByVehicle("Coolant temperature"))
+                                       unavailability: unavailable.reason)
         }
 
+        let coolant = coolantEntry.value
         let range = context.profile?.operatingRange(for: .coolantTemperatureC, condition: .warmedUp)
         let status = range?.status(for: coolant) ?? .unknown
-        var points: [InsightSourceDatum] = [.measured("Coolant", String(format: "%.0f °C", coolant))]
-        if let load = context.value(.engineLoadPercent, freshWithin: 60) {
-            points.append(.measured("Engine load", String(format: "%.0f%%", load)))
+        var points: [InsightSourceDatum] = [.trustedEntry("Coolant", String(format: "%.0f °C", coolant), entry: coolantEntry)]
+        if let load = context.trustedEntry(.engineLoadPercent, freshWithin: 60) {
+            points.append(.trustedEntry("Engine load", String(format: "%.0f%%", load.value), entry: load))
         }
 
         let headline: String
@@ -125,9 +140,16 @@ enum VehicleHealthEvaluator {
     /// disagreeing about the same car -- the failure mode this project already has an
     /// example of, in coolant.
     private static func battery(_ context: InsightContext) -> VehicleHealthSystem {
-        let voltage = context.value(.controlModuleVoltageV, freshWithin: 600)
+        if case .available = context.availability(.controlModuleVoltageV, freshWithin: 600) {
+            // Continue into the shared assessment below.
+        } else {
+            let unavailable = sensorUnavailable(context.availability(.controlModuleVoltageV, freshWithin: 600),
+                                                name: "System voltage")
+            return VehicleHealthSystem(kind: .battery, status: .unknown, headline: unavailable.headline,
+                                       detail: nil, dataPoints: [], unavailability: unavailable.reason)
+        }
         let assessment = BatteryIntelligence.assess(
-            voltage: voltage.map { .measured($0, at: context.now) } ?? .unavailable(),
+            voltage: context.trustedReading(.controlModuleVoltageV, freshWithin: 600),
             isEngineRunning: context.telemetry?.isEngineRunning(now: context.now),
             baseline: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff),
             profile: context.profile,
@@ -139,6 +161,26 @@ enum VehicleHealthEvaluator {
                                    detail: assessment.detail,
                                    dataPoints: assessment.dataPoints,
                                    unavailability: assessment.unavailability)
+    }
+
+    private static func sensorUnavailable(_ availability: SensorAvailability,
+                                          name: String) -> (headline: String, reason: UnavailabilityReason) {
+        switch availability {
+        case .adapterDisconnected:
+            return ("Connect an adapter to see \(name.lowercased())", .obdNotConnected)
+        case .waitingForFirstReading:
+            return ("Waiting for \(name.lowercased())", .waitingForSensor(name))
+        case let .stale(date):
+            return ("\(name) reading is stale", .staleSensor(name, date))
+        case .suspect:
+            return ("\(name) data was rejected", .rejectedSensor(name))
+        case .temporarilyUnavailable:
+            return ("\(name) is temporarily unavailable", .sensorTemporarilyUnavailable(name))
+        case .unsupported:
+            return ("This ECU doesn't report \(name.lowercased())", .pidNotSupportedByVehicle(name))
+        case .available:
+            return (name, .sensorTemporarilyUnavailable(name))
+        }
     }
 
     private static func fuelSystem(_ context: InsightContext) -> VehicleHealthSystem {

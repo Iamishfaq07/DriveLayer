@@ -68,7 +68,7 @@ enum BatteryIntelligence {
         var detail: String?
 
         if let baseline, baseline.isEstablished {
-            points.append(.measured("Your usual", String(format: "%.2f V", baseline.median)))
+            points.append(.learned("Your usual", String(format: "%.2f V", baseline.median)))
             if let trend = baseline.trendOverWindow, trend <= trendWatchThresholdV {
                 status = max(status, .watch)
                 detail = String(format: "Readings have been trending about %.2f V lower over %d days. "

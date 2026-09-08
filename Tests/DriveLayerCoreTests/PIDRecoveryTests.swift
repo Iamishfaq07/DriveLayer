@@ -16,7 +16,36 @@ private actor RecoveringPIDTransport: OBDTransport {
     }
 }
 
+private actor NoDataThenValueTransport: OBDTransport {
+    nonisolated let identifier = "no-data-recovery"
+    nonisolated let displayName = "NO DATA recovery"
+    private var first = true
+    func connect() async throws {}
+    func disconnect() async {}
+    func send(_ command: String, timeout: TimeInterval) async throws -> String {
+        if first { first = false; throw OBDError.noData }
+        return "41 0C 1C 20\r>"
+    }
+}
+
 final class PIDRecoveryTests: XCTestCase {
+    func testMode01NoDataCoolsDownThenRecoversInSameSession() async throws {
+        let clock = MutableDateProvider(Date(timeIntervalSince1970: 1_700_000_000))
+        let session = OBDSession(transport: NoDataThenValueTransport(), dateProvider: clock)
+        let pid = OBDPID.current(0x0C)
+        do { _ = try await session.read(pid); XCTFail("Expected NO DATA") }
+        catch { XCTAssertEqual(error as? OBDError, .noData) }
+        let unsupported = await session.unsupportedPIDs
+        XCTAssertFalse(unsupported.contains(pid))
+        let initiallyPollable = await session.canPoll(pid)
+        XCTAssertFalse(initiallyPollable)
+        let retryDate = await session.retryDate(for: pid)
+        clock.set(try XCTUnwrap(retryDate))
+        XCTAssertEqual(try await session.read(pid).numericValue, 1800)
+        let recovered = await session.canPoll(pid)
+        XCTAssertTrue(recovered)
+    }
+
     func testRepeatedTimeoutsCooldownAndRecoverWithoutNewSession() async throws {
         let clock = MutableDateProvider(Date(timeIntervalSince1970: 1_700_000_000))
         let transport = RecoveringPIDTransport()

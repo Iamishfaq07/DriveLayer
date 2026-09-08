@@ -11,7 +11,8 @@ struct EngineTemperatureRule: InsightRule {
     let identifier = "engine.temperature"
 
     func evaluate(_ context: InsightContext) -> [DriveInsight] {
-        guard let coolant = context.value(.coolantTemperatureC, freshWithin: 60) else { return [] }
+        guard let coolantEntry = context.trustedEntry(.coolantTemperatureC, freshWithin: 60) else { return [] }
+        let coolant = coolantEntry.value
 
         let isClimbing = (context.gradient?.percent ?? 0) >= 3
         let baselineContext: BaselineContext = isClimbing ? .climbing : .warmedUp
@@ -20,10 +21,10 @@ struct EngineTemperatureRule: InsightRule {
         let rangeStatus = range?.status(for: coolant) ?? .unknown
 
         var evidence: [InsightSourceDatum] = [
-            .measured("Coolant", String(format: "%.0f °C", coolant))
+            .trustedEntry("Coolant", String(format: "%.0f °C", coolant), entry: coolantEntry)
         ]
         if let baseline, baseline.isEstablished {
-            evidence.append(.measured("Your usual on \(baselineContext.displayName)",
+            evidence.append(.learned("Your usual on \(baselineContext.displayName)",
                                       String(format: "%.0f–%.0f °C", baseline.percentile10, baseline.percentile90)))
         }
         if let gradient = context.gradient, isClimbing {
@@ -93,14 +94,15 @@ struct BatteryHealthRule: InsightRule {
     let identifier = "battery.health"
 
     func evaluate(_ context: InsightContext) -> [DriveInsight] {
-        guard let voltage = context.value(.controlModuleVoltageV, freshWithin: 300) else { return [] }
+        guard let voltageEntry = context.trustedEntry(.controlModuleVoltageV, freshWithin: 300) else { return [] }
+        let voltage = voltageEntry.value
         let isRunning = context.telemetry?.isEngineRunning(now: context.now)
         let condition: OperatingCondition = isRunning == false ? .engineOff : .engineRunning
         let range = context.profile?.operatingRange(for: .controlModuleVoltageV, condition: condition)
         let rangeStatus = range?.status(for: voltage) ?? .unknown
 
         var evidence: [InsightSourceDatum] = [
-            .measured("Voltage", String(format: "%.2f V", voltage))
+            .trustedEntry("Voltage", String(format: "%.2f V", voltage), entry: voltageEntry)
         ]
 
         if rangeStatus >= .attention {
@@ -129,7 +131,7 @@ struct BatteryHealthRule: InsightRule {
               let trendOverWindow = baseline.trendOverWindow,
               trendOverWindow <= -0.2 else { return [] }
 
-        evidence.append(.measured("Your usual", String(format: "%.2f V", baseline.median)))
+        evidence.append(.learned("Your usual", String(format: "%.2f V", baseline.median)))
         evidence.append(.estimated("Trend", String(format: "%.2f V over %d days", trendOverWindow, baseline.windowDays)))
 
         return [DriveInsight(
@@ -156,7 +158,8 @@ struct EngineLoadRule: InsightRule {
 
     func evaluate(_ context: InsightContext) -> [DriveInsight] {
         guard context.isDriving,
-              let load = context.value(.engineLoadPercent, freshWithin: 20) else { return [] }
+              let loadEntry = context.trustedEntry(.engineLoadPercent, freshWithin: 20) else { return [] }
+        let load = loadEntry.value
         let isClimbing = (context.gradient?.percent ?? 0) >= 3
         let baselineContext: BaselineContext = isClimbing ? .climbing : .cruising
         guard let baseline = context.bestBaseline(.engineLoadPercent, preferring: baselineContext),
@@ -181,8 +184,8 @@ struct EngineLoadRule: InsightRule {
                 : "Sustained load above your own pattern on level ground can be associated with a dragging brake, low tyre pressure, extra weight, or a restricted air filter. DriveLayer can see the load, not the cause.",
             confidence: 0.65,
             sourceData: [
-                .measured("Engine load", String(format: "%.0f%%", load)),
-                .measured("Your usual", String(format: "%.0f–%.0f%%", baseline.percentile10, baseline.percentile90))
+                .trustedEntry("Engine load", String(format: "%.0f%%", load), entry: loadEntry),
+                .learned("Your usual", String(format: "%.0f–%.0f%%", baseline.percentile10, baseline.percentile90))
             ],
             createdAt: context.now,
             expiresAt: context.now.addingTimeInterval(600)
@@ -199,7 +202,9 @@ struct FuelRule: InsightRule {
         guard let status = context.fuelStatus, let level = status.levelPercent.value else { return [] }
         guard status.isLow else { return [] }
 
-        var evidence: [InsightSourceDatum] = [.measured("Tank level", String(format: "%.0f%%", level))]
+        var evidence: [InsightSourceDatum] = [InsightSourceDatum(label: "Tank level",
+                                                                 formattedValue: String(format: "%.0f%%", level),
+                                                                 provenance: status.levelPercent.provenance)]
         var summary = String(format: "Fuel is down to about %.0f%%.", level)
         if let range = status.estimatedRangeKm.value {
             evidence.append(.estimated("Estimated range", String(format: "%.0f km", range)))
@@ -419,8 +424,8 @@ struct TripComparisonRule: InsightRule {
             details: "Compared against \(comparison.comparableTripCount) previous drives between the same start and end areas. DriveLayer reports what these figures moved together with, not what caused what.",
             confidence: 0.65,
             sourceData: [
-                .measured("This drive", String(format: "%.0f min", comparison.durationSeconds / 60)),
-                .measured("Typical", String(format: "%.0f min", comparison.typicalDurationSeconds / 60))
+                .estimated("This drive", String(format: "%.0f min", comparison.durationSeconds / 60)),
+                .learned("Typical", String(format: "%.0f min", comparison.typicalDurationSeconds / 60))
             ],
             createdAt: context.now,
             expiresAt: context.now.addingTimeInterval(12 * 3_600),

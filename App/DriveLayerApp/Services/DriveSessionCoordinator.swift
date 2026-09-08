@@ -705,6 +705,32 @@ final class DriveSessionCoordinator {
     }
 
     /// Builds the copilot's snapshot from the same context the insights came from.
+    func carPlayInsightContext(now: Date = Date()) -> InsightContext {
+        InsightContext(now: now,
+                       vehicle: vehicle,
+                       profile: profile,
+                       isAdapterConnected: obd.isConnected,
+                       telemetry: obd.isConnected ? obd.telemetry : nil,
+                       capabilities: obd.capabilities,
+                       currentTrip: currentTrip,
+                       recentTrips: vehicle.map { store.trips(vehicleID: $0.id, limit: 60) } ?? [],
+                       baselines: baselines,
+                       gradient: gradient,
+                       terrainFeature: terrainFeature,
+                       currentWeather: currentWeather,
+                       weatherChanges: weatherChanges,
+                       troubleCodes: obd.troubleCodes,
+                       diagnosticSnapshot: obd.diagnosticSnapshot,
+                       maintenanceStatuses: vehicle.map {
+                           MaintenanceEngine.statuses(for: store.maintenanceItems(vehicleID: $0.id),
+                                                      currentOdometerKm: $0.odometerKm, now: now)
+                       } ?? [],
+                       documents: vehicle.map { store.documents(vehicleID: $0.id) } ?? [],
+                       fuelStatus: fuelStatus,
+                       dieselAssessment: dieselAssessment,
+                       isDriving: isRecording)
+    }
+
     func copilotSnapshot() -> VehicleContextSnapshot {
         guard let vehicle else {
             return VehicleContextSnapshot(generatedAt: Date())

@@ -125,10 +125,12 @@ enum EngineThermalModel {
         let phase = phase(coolantC: coolant, profile: profile)
 
         var points: [InsightSourceDatum] = [
-            .measured("Coolant", String(format: "%.0f °C", coolant))
+            InsightSourceDatum(label: "Coolant", formattedValue: String(format: "%.0f °C", coolant),
+                               provenance: coolantC.provenance)
         ]
         if let oil = oilC.value {
-            points.append(.measured("Oil", String(format: "%.0f °C", oil)))
+            points.append(InsightSourceDatum(label: "Oil", formattedValue: String(format: "%.0f °C", oil),
+                                             provenance: oilC.provenance))
         }
         if let ambientC {
             points.append(.measured("Ambient", String(format: "%.0f °C", ambientC)))

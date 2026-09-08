@@ -304,11 +304,6 @@ actor OBDSession {
     /// Records what a failure means for future polling.
     private func note(_ error: OBDError, for pid: OBDPID) {
         if error.suggestsUnsupported {
-            // NO DATA from a diagnostic mode is not a "no". A car with nothing stored
-            // answers exactly that way, and adding it here used to be the second of
-            // two independent permanent blocks - the capability report said unknown
-            // and this said never ask again, so a fault appearing later went unseen.
-            if case .noData = error, pid.mode.isDiagnostic { return }
             knownUnsupported.insert(pid)
             consecutiveTransientFailures[pid] = 0
             return

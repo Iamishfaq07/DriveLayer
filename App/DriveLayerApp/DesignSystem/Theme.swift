@@ -155,7 +155,7 @@ enum DLColor {
         case .measured, .userEntered: return primaryText
         // Simulated reads at derived weight: it is not a guess, but it is not this
         // car either, and it must never look like a sensor reading.
-        case .estimated, .inferred, .simulated: return secondaryText
+        case .estimated, .inferred, .learned, .simulated: return secondaryText
         case .unavailable: return unknown
         }
     }

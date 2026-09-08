@@ -94,7 +94,7 @@ enum InsightConfidence: String, Codable, CaseIterable, Sendable, Comparable {
         switch provenance {
         case .measured, .userEntered, .simulated: return .high
         case .estimated: return .medium
-        case .inferred: return .medium
+        case .inferred, .learned: return .medium
         case .unavailable: return .low
         }
     }
