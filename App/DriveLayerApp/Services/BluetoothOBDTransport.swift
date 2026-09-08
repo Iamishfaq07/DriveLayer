@@ -34,6 +34,9 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
     private var targetPeripheralID: UUID?
     private var isReady = false
     private var requestCounter: UInt64 = 0
+    private var connectionGeneration: UInt64 = 0
+    private var pendingServices: Set<CBUUID> = []
+    private var discoveredServices: [CBUUID: [CBCharacteristic]] = [:]
 
     /// The link dropped without us asking for it.
     ///
@@ -104,6 +107,8 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
                     continuation.resume(throwing: OBDError.connectionFailed("A connection is already in progress."))
                     return
                 }
+                self.connectionGeneration += 1
+                let generation = self.connectionGeneration
                 self.pendingConnection = continuation
                 self.didLoseConnection = false
                 self.isDisconnectingIntentionally = false
@@ -114,10 +119,8 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
                 }
                 // Bluetooth can take a while to power on and a car can be out of range.
                 self.queue.asyncAfter(deadline: .now() + 20) {
-                    guard let pending = self.pendingConnection else { return }
-                    self.pendingConnection = nil
-                    self.central?.stopScan()
-                    pending.resume(throwing: OBDError.connectionFailed("No adapter responded. Check it is plugged in and the ignition is on."))
+                    guard self.connectionGeneration == generation, self.pendingConnection != nil else { return }
+                    self.completeConnection(.failure(OBDError.connectionFailed("No adapter responded. Check it is plugged in and the ignition is on.")))
                 }
             }
         }
@@ -128,15 +131,8 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
             queue.async {
                 self.isDisconnectingIntentionally = true
                 self.didLoseConnection = false
-                self.failPendingRequest(with: .connectionLost)
-                if let peripheral = self.peripheral {
-                    self.central?.cancelPeripheralConnection(peripheral)
-                }
-                self.central?.stopScan()
-                self.isReady = false
-                self.writeCharacteristic = nil
-                self.notifyCharacteristic = nil
-                self.peripheral = nil
+                self.completeConnection(.failure(OBDError.connectionLost))
+                self.clearConnection()
                 continuation.resume()
             }
         }
@@ -191,7 +187,7 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
     // MARK: - Internals
 
     private func beginConnectionIfPowered() {
-        guard let central, central.state == .poweredOn else { return }
+        guard pendingConnection != nil, peripheral == nil, let central, central.state == .poweredOn else { return }
         if let targetPeripheralID,
            let known = central.retrievePeripherals(withIdentifiers: [targetPeripheralID]).first {
             peripheral = known
@@ -223,34 +219,63 @@ final class BluetoothOBDTransport: NSObject, OBDTransport, @unchecked Sendable {
         pendingConnection = nil
         switch result {
         case .success: pending.resume()
-        case let .failure(error): pending.resume(throwing: error)
+        case let .failure(error):
+            clearConnection()
+            pending.resume(throwing: error)
         }
     }
 
-    /// Recognises an adapter by the characteristics it exposes rather than by name,
-    /// because these devices are sold under dozens of names with the same firmware.
-    private func adopt(characteristics: [CBCharacteristic], of peripheral: CBPeripheral) {
-        for characteristic in characteristics {
-            if characteristic.properties.contains(.notify) || characteristic.properties.contains(.indicate) {
-                notifyCharacteristic = characteristic
-                peripheral.setNotifyValue(true, for: characteristic)
-            }
-            if characteristic.properties.contains(.write) || characteristic.properties.contains(.writeWithoutResponse) {
-                writeCharacteristic = characteristic
-            }
+    /// Discards all state before a late callback can declare an expired attempt ready.
+    private func clearConnection() {
+        connectionGeneration += 1
+        central?.stopScan()
+        let oldPeripheral = peripheral
+        peripheral = nil
+        oldPeripheral?.delegate = nil
+        if let oldPeripheral { central?.cancelPeripheralConnection(oldPeripheral) }
+        isReady = false
+        writeCharacteristic = nil
+        notifyCharacteristic = nil
+        pendingServices.removeAll()
+        discoveredServices.removeAll()
+        responseBuffer = ""
+        failPendingRequest(with: .connectionLost)
+    }
+
+    /// Select one coherent service, independent of callback order. Service UUID hints
+    /// influence priority only; unknown UART services remain eligible.
+    private func adoptDiscoveredUART(of peripheral: CBPeripheral) {
+        guard pendingServices.isEmpty, pendingConnection != nil else { return }
+        guard let pair = Self.selectUART(from: discoveredServices) else {
+            completeConnection(.failure(OBDError.connectionFailed("No compatible Bluetooth UART service was found.")))
+            return
         }
-        // Readiness is deliberately not declared here. `setNotifyValue` only *asks* for
-        // the subscription; CoreBluetooth confirms it separately, and a command written
-        // before that confirmation gets its reply as a notification iOS is not yet
-        // delivering -- a silent stall until the request times out, which is precisely how
-        // slower clones lost their first response.
-        completeReadinessIfPossible()
+        writeCharacteristic = pair.write
+        notifyCharacteristic = pair.notify
+        peripheral.setNotifyValue(true, for: pair.notify)
+    }
+
+    static func selectUART(from discovered: [CBUUID: [CBCharacteristic]]) -> (write: CBCharacteristic, notify: CBCharacteristic)? {
+        let hints = candidateServiceUUIDs
+        let services = discovered.keys.sorted {
+            let left = hints.firstIndex(of: $0) ?? Int.max
+            let right = hints.firstIndex(of: $1) ?? Int.max
+            return left == right ? $0.uuidString < $1.uuidString : left < right
+        }
+        for service in services {
+            let characteristics = (discovered[service] ?? []).sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let writes = characteristics.filter { $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse) }
+            let notifications = characteristics.filter { $0.properties.contains(.notify) || $0.properties.contains(.indicate) }
+            guard let write = writes.first, let notify = notifications.first else { continue }
+            return (write, notify)
+        }
+        return nil
     }
 
     /// Declares the transport ready once there is somewhere to write and the notify
     /// subscription is confirmed live.
     private func completeReadinessIfPossible() {
-        guard !isReady,
+        guard pendingConnection != nil, !isReady,
               writeCharacteristic != nil,
               let notify = notifyCharacteristic,
               notify.isNotifying else { return }
@@ -291,7 +316,7 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
-        guard self.peripheral == nil else { return }
+        guard pendingConnection != nil, self.peripheral == nil else { return }
         guard Self.shouldBind(to: peripheral.identifier,
                               name: peripheral.name,
                               advertisement: advertisementData,
@@ -325,18 +350,24 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard pendingConnection != nil, self.peripheral === peripheral else {
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
         peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
+        guard self.peripheral === peripheral else { return }
         completeConnection(.failure(OBDError.connectionFailed(error?.localizedDescription ?? "The adapter refused the connection.")))
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        guard self.peripheral === peripheral else { return }
         isReady = false
         writeCharacteristic = nil
         notifyCharacteristic = nil
@@ -351,11 +382,16 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
 extension BluetoothOBDTransport: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard pendingConnection != nil, self.peripheral === peripheral else { return }
         guard error == nil else {
             completeConnection(.failure(OBDError.connectionFailed("Couldn't read the adapter's services.")))
             return
         }
-        for service in peripheral.services ?? [] {
+        let services = peripheral.services ?? []
+        pendingServices = Set(services.map { $0.uuid })
+        discoveredServices.removeAll()
+        if services.isEmpty { adoptDiscoveredUART(of: peripheral); return }
+        for service in services {
             peripheral.discoverCharacteristics(nil, for: service)
         }
     }
@@ -363,13 +399,17 @@ extension BluetoothOBDTransport: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        guard error == nil else { return }
-        adopt(characteristics: service.characteristics ?? [], of: peripheral)
+        guard pendingConnection != nil, self.peripheral === peripheral else { return }
+        pendingServices.remove(service.uuid)
+        if error == nil { discoveredServices[service.uuid] = service.characteristics ?? [] }
+        adoptDiscoveredUART(of: peripheral)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
+        guard pendingConnection != nil, self.peripheral === peripheral,
+              characteristic === notifyCharacteristic else { return }
         guard error == nil else {
             completeConnection(.failure(OBDError.connectionFailed("The adapter would not turn on notifications.")))
             return
@@ -382,7 +422,8 @@ extension BluetoothOBDTransport: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
-        guard error == nil, let data = characteristic.value else { return }
+        guard isReady, self.peripheral === peripheral, characteristic === notifyCharacteristic,
+              pendingRequest != nil, error == nil, let data = characteristic.value else { return }
         responseBuffer += String(decoding: data, as: UTF8.self)
 
         // ELM327 ends every reply with its prompt character.
@@ -396,6 +437,7 @@ extension BluetoothOBDTransport: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        guard self.peripheral === peripheral, characteristic === writeCharacteristic else { return }
         if let error {
             failPendingRequest(with: .busError(error.localizedDescription))
         }

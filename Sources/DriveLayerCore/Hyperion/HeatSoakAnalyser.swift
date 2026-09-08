@@ -85,6 +85,7 @@ enum HeatSoakAnalyser {
             return .unknown
         }
 
+        let baseline = baseline?.key.metric == .intakeAmbientDeltaC ? baseline : nil
         let delta = intake - ambient
         let hasAirflow = (speedKmh ?? 0) >= airflowSpeedKmh
         let isFalling = peakDeltaC.map { delta <= $0 - recoveryDeltaC } ?? false
@@ -101,8 +102,8 @@ enum HeatSoakAnalyser {
         }
 
         var points: [InsightSourceDatum] = [
-            .measured("Intake", String(format: "%.0f °C", intake)),
-            .measured("Ambient", String(format: "%.0f °C", ambient)),
+            InsightSourceDatum(label: "Intake", formattedValue: String(format: "%.0f °C", intake), provenance: intakeC.provenance),
+            InsightSourceDatum(label: "Ambient", formattedValue: String(format: "%.0f °C", ambient), provenance: ambientC.provenance),
             .estimated("Above ambient", String(format: "%+.0f °C", delta))
         ]
         if let speedKmh {
@@ -115,7 +116,10 @@ enum HeatSoakAnalyser {
             ambientC: ambientC,
             // Estimated, not measured: it is a subtraction of two measurements, and the
             // distinction is the whole provenance model.
-            deltaC: .estimated(delta, basis: "Intake air temperature minus ambient air temperature."),
+            deltaC: Provenanced(value: delta,
+                                provenance: intakeC.provenance == .simulated || ambientC.provenance == .simulated ? .simulated : .estimated,
+                                timestamp: [intakeC.timestamp, ambientC.timestamp].compactMap { $0 }.min(),
+                                basis: "Intake air temperature minus ambient air temperature."),
             // Never worse than a watch. Heat soak is a normal operating condition, and
             // this project does not manufacture alarm out of physics.
             status: phase == .soaking ? .watch : .normal,

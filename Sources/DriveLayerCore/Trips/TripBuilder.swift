@@ -119,7 +119,7 @@ struct TripBuilder: Sendable {
             lastEngineRunningAt = now
         }
 
-        if let speed = telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now) {
+        if let speed = telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: now) {
             maximumSpeedKmh = max(maximumSpeedKmh ?? speed, speed)
             if speed >= 3 {
                 movingSeconds += interval
@@ -130,17 +130,17 @@ struct TripBuilder: Sendable {
             }
         }
 
-        if let rate = telemetry.value(.fuelRateLitresPerHour, freshWithin: 10, now: now), rate >= 0 {
+        if let rate = telemetry.trustedValue(.fuelRateLitresPerHour, freshWithin: 10, now: now), rate >= 0 {
             sawFuelRate = true
             integratedFuelLitres += rate * (interval / 3_600)
         }
 
-        if let level = telemetry.value(.fuelLevelPercent, freshWithin: 180, now: now) {
+        if let level = telemetry.trustedValue(.fuelLevelPercent, freshWithin: 180, now: now) {
             if firstFuelLevelPercent == nil { firstFuelLevelPercent = level }
             lastFuelLevelPercent = level
         }
 
-        if let coolant = telemetry.value(.coolantTemperatureC, freshWithin: 60, now: now) {
+        if let coolant = telemetry.trustedValue(.coolantTemperatureC, freshWithin: 60, now: now) {
             peakCoolant = max(peakCoolant ?? coolant, coolant)
             if !reportedCoolantEvent,
                let range = profile?.operatingRange(for: .coolantTemperatureC, condition: .warmedUp),
@@ -151,12 +151,12 @@ struct TripBuilder: Sendable {
             }
         }
 
-        if let load = telemetry.value(.engineLoadPercent, freshWithin: 15, now: now) {
+        if let load = telemetry.trustedValue(.engineLoadPercent, freshWithin: 15, now: now) {
             loadSum += load
             loadSamples += 1
         }
 
-        if let voltage = telemetry.value(.controlModuleVoltageV, freshWithin: 120, now: now) {
+        if let voltage = telemetry.trustedValue(.controlModuleVoltageV, freshWithin: 120, now: now) {
             minimumVoltage = min(minimumVoltage ?? voltage, voltage)
             if !reportedVoltageEvent,
                telemetry.isEngineRunning(now: now) == true,

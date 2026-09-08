@@ -28,6 +28,7 @@ struct TelemetrySample: Codable, Sendable, Equatable {
 struct VehicleTelemetry: Sendable, Equatable {
     var updatedAt: Date
     private var entries: [VehicleMetric: Entry] = [:]
+    private var rejections: [VehicleMetric: String] = [:]
 
     /// The gates, owned here so that admitting a reading and judging it cannot come apart.
     ///
@@ -66,6 +67,7 @@ struct VehicleTelemetry: Sendable, Equatable {
                                 provenance: provenance,
                                 quality: quality,
                                 rejectionReason: rejectionReason)
+        rejections[metric] = rejectionReason
         if timestamp > updatedAt { updatedAt = timestamp }
     }
 
@@ -130,6 +132,7 @@ struct VehicleTelemetry: Sendable, Equatable {
     /// nobody is told it is current. When there is nothing to hold, the metric stays
     /// absent: a rejected reading must never become an entry, and must never become zero.
     private mutating func markRejected(_ metric: VehicleMetric, reason: String?) {
+        rejections[metric] = reason
         guard var entry = entries[metric] else { return }
         entry.quality = .suspect
         entry.rejectionReason = reason
@@ -164,7 +167,7 @@ struct VehicleTelemetry: Sendable, Equatable {
 
     /// Why this metric's newest reading was refused, if it was.
     func rejectionReason(_ metric: VehicleMetric) -> String? {
-        entries[metric]?.rejectionReason
+        rejections[metric]
     }
 
     /// Forgets the gates' history. Called when the adapter changes: the previous car's
@@ -178,19 +181,34 @@ struct VehicleTelemetry: Sendable, Equatable {
         entries.values.contains { !$0.provenance.describesRealVehicle }
     }
 
-    func entry(_ metric: VehicleMetric) -> Entry? { entries[metric] }
+    /// Diagnostics only: callers displaying this must show its age and quality.
+    func lastKnownEntry(_ metric: VehicleMetric) -> Entry? { entries[metric] }
+    func lastKnownValue(_ metric: VehicleMetric) -> Double? { entries[metric]?.value }
 
-    func value(_ metric: VehicleMetric) -> Double? { entries[metric]?.value }
-
-    /// A value, but only if it is fresh enough to act on.
-    func value(_ metric: VehicleMetric, freshWithin interval: TimeInterval, now: Date) -> Double? {
-        guard let entry = entries[metric] else { return nil }
-        guard now.timeIntervalSince(entry.timestamp) <= interval else { return nil }
-        return entry.value
+    func sensorState(_ metric: VehicleMetric, freshWithin interval: TimeInterval, now: Date) -> SensorQuality {
+        guard let entry = entries[metric] else { return rejections[metric] == nil ? .unavailable : .invalid }
+        guard entry.quality == .good else { return entry.quality }
+        return trustedEntry(metric, freshWithin: interval, now: now) == nil ? .stale : .good
     }
 
-    func provenanced(_ metric: VehicleMetric) -> Provenanced<Double> {
-        guard let entry = entries[metric] else { return .unavailable() }
+    /// A value, but only if it is fresh enough to act on.
+    func trustedEntry(_ metric: VehicleMetric, freshWithin interval: TimeInterval, now: Date) -> Entry? {
+        guard let entry = entries[metric] else { return nil }
+        let age = now.timeIntervalSince(entry.timestamp)
+        guard entry.quality == .good, entry.value.isFinite,
+              entry.provenance != .unavailable, age >= 0, age <= interval else { return nil }
+        return entry
+    }
+
+    func trustedValue(_ metric: VehicleMetric, freshWithin interval: TimeInterval, now: Date) -> Double? {
+        trustedEntry(metric, freshWithin: interval, now: now)?.value
+    }
+
+    func provenancedTrustedReading(_ metric: VehicleMetric, freshWithin interval: TimeInterval,
+                                   now: Date) -> Provenanced<Double> {
+        guard let entry = trustedEntry(metric, freshWithin: interval, now: now) else {
+            return .unavailable(basis: rejectionReason(metric) ?? "No fresh, trusted reading is available.")
+        }
         return Provenanced(value: entry.value, provenance: entry.provenance, timestamp: entry.timestamp)
     }
 
@@ -201,7 +219,8 @@ struct VehicleTelemetry: Sendable, Equatable {
     /// Converts to a storable sample, dropping anything staler than the window.
     func sample(at timestamp: Date, freshWithin interval: TimeInterval = 30) -> TelemetrySample {
         var values: [VehicleMetric: Double] = [:]
-        for (metric, entry) in entries where timestamp.timeIntervalSince(entry.timestamp) <= interval {
+        for metric in entries.keys {
+            guard let entry = trustedEntry(metric, freshWithin: interval, now: timestamp) else { continue }
             values[metric] = entry.value
         }
         return TelemetrySample(timestamp: timestamp, values: values)
@@ -210,8 +229,8 @@ struct VehicleTelemetry: Sendable, Equatable {
     /// True when the engine is running, judged from whatever the vehicle reports.
     /// Returns `nil` rather than guessing when there is no basis at all.
     func isEngineRunning(now: Date) -> Bool? {
-        if let rpm = value(.engineRPM, freshWithin: 15, now: now) { return rpm > 250 }
-        if let voltage = value(.controlModuleVoltageV, freshWithin: 30, now: now) {
+        if let rpm = trustedValue(.engineRPM, freshWithin: 15, now: now) { return rpm > 250 }
+        if let voltage = trustedValue(.controlModuleVoltageV, freshWithin: 30, now: now) {
             // A charging system is running well above resting battery voltage.
             return voltage > 13.0
         }

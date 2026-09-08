@@ -169,7 +169,7 @@ enum OBDPIDCatalog {
                          decode: { .number(byteA($0)) }),
 
         OBDPIDDescriptor(pid: .current(0x0E), name: "Timing advance", shortName: "Timing",
-                         metric: nil, unitLabel: "°", expectedByteCount: 1,
+                         metric: .timingAdvanceDegrees, unitLabel: "°", expectedByteCount: 1,
                          plausibleRange: -64...63.5, refresh: .medium,
                          decode: { .number(byteA($0) / 2.0 - 64.0) }),
 
@@ -179,7 +179,7 @@ enum OBDPIDCatalog {
                          decode: { .number(temperatureByte($0)) }),
 
         OBDPIDDescriptor(pid: .current(0x10), name: "Mass air flow", shortName: "MAF",
-                         metric: nil, unitLabel: "g/s", expectedByteCount: 2,
+                         metric: .massAirFlowGramsPerSecond, unitLabel: "g/s", expectedByteCount: 2,
                          plausibleRange: 0...655.35, refresh: .fast,
                          decode: { .number(word($0) / 100.0) }),
 

@@ -69,12 +69,12 @@ final class SensorGateProductionPathTests: XCTestCase {
             let admission = telemetry.apply(corruptCoolant(at: start.addingTimeInterval(Double(index))),
                                             plausibleRange: plausibleRange(0x05))
             XCTAssertFalse(admission.wasAccepted, "500 C was accepted on repeat \(index)")
-            XCTAssertEqual(telemetry.value(.coolantTemperatureC), 90,
+            XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 90,
                            "the last good value should still stand on repeat \(index)")
         }
 
         // Never stored, and never turned into a zero either.
-        XCTAssertEqual(telemetry.value(.coolantTemperatureC), 90)
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 90)
         XCTAssertEqual(telemetry.quality(.coolantTemperatureC), .suspect)
         XCTAssertNotNil(telemetry.rejectionReason(.coolantTemperatureC))
     }
@@ -93,7 +93,8 @@ final class SensorGateProductionPathTests: XCTestCase {
                             plausibleRange: plausibleRange(0x05))
 
         let sample = telemetry.sample(at: start.addingTimeInterval(1))
-        XCTAssertEqual(sample[.coolantTemperatureC], 90, "the impossible value must not be stored")
+        XCTAssertNil(sample[.coolantTemperatureC], "neither the rejected value nor its suspect held predecessor may enter a sample")
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 90, "diagnostics retain the last accepted value")
     }
 
     /// A metric whose very first reading is rejected must stay absent - not present as 0.
@@ -105,7 +106,7 @@ final class SensorGateProductionPathTests: XCTestCase {
         let admission = telemetry.apply(corruptCoolant(at: start), plausibleRange: plausibleRange(0x05))
 
         XCTAssertFalse(admission.wasAccepted)
-        XCTAssertNil(telemetry.value(.coolantTemperatureC), "absent, not zero")
+        XCTAssertNil(telemetry.lastKnownValue(.coolantTemperatureC), "absent, not zero")
         XCTAssertFalse(telemetry.availableMetrics.contains(.coolantTemperatureC))
         XCTAssertEqual(telemetry.quality(.coolantTemperatureC), .unavailable)
         XCTAssertNil(telemetry.sample(at: start)[.coolantTemperatureC])
@@ -126,7 +127,7 @@ final class SensorGateProductionPathTests: XCTestCase {
         let jump = try reading(0x05, [160], at: start.addingTimeInterval(1))
         XCTAssertFalse(apply(jump, code: 0x05, to: &telemetry).wasAccepted,
                        "an 80 C jump in one second is a bad frame")
-        XCTAssertEqual(telemetry.value(.coolantTemperatureC), 40)
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 40)
 
         // But if it keeps saying 120, the limit is what is wrong. Unlike an out-of-range
         // value, an impossible rate may yield - that is the one rejection which should.
@@ -158,7 +159,7 @@ final class SensorGateProductionPathTests: XCTestCase {
                                         now: start.addingTimeInterval(1))
 
         XCTAssertEqual(admission, .rejected(.sensorDefault))
-        XCTAssertNil(telemetry.value(.engineRPM), "0 rpm must not be stored as a reading")
+        XCTAssertNil(telemetry.lastKnownValue(.engineRPM), "0 rpm must not be stored as a reading")
     }
 
     /// The same zero is legitimate with the engine off, and must be accepted. A gate that
@@ -170,7 +171,7 @@ final class SensorGateProductionPathTests: XCTestCase {
 
         XCTAssertEqual(apply(zeroRPM, code: 0x0C, to: &telemetry).acceptedValue, 0,
                        "a stationary engine really does report 0 rpm")
-        XCTAssertEqual(telemetry.value(.engineRPM), 0)
+        XCTAssertEqual(telemetry.lastKnownValue(.engineRPM), 0)
     }
 
     // MARK: - Staleness
@@ -227,7 +228,7 @@ final class SensorGateProductionPathTests: XCTestCase {
         let revving = try reading(0x0C, [0x1F, 0x40], at: start.addingTimeInterval(1)) // 2000 rpm
         XCTAssertEqual(apply(revving, code: 0x0C, to: &telemetry).acceptedValue, 2000,
                        "1000 rpm in a second is ordinary driving")
-        XCTAssertEqual(telemetry.value(.coolantTemperatureC), 90, "coolant must be untouched")
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 90, "coolant must be untouched")
     }
 
     /// Resetting forgets history, so a new adapter does not inherit the last car's
@@ -261,6 +262,6 @@ final class SensorGateProductionPathTests: XCTestCase {
 
         XCTAssertEqual(admission.acceptedValue, 90)
         XCTAssertTrue(telemetry.containsSimulatedData)
-        XCTAssertEqual(telemetry.provenanced(.coolantTemperatureC).provenance, .simulated)
+        XCTAssertEqual(telemetry.provenancedTrustedReading(.coolantTemperatureC, freshWithin: 60, now: telemetry.updatedAt).provenance, .simulated)
     }
 }

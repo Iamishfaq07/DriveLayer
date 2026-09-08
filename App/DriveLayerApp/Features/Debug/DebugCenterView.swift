@@ -108,7 +108,7 @@ struct DebugCenterView: View {
                     }
                 }
                 if !unsupported.isEmpty {
-                    DisclosureGroup("Rested after failures") {
+                    DisclosureGroup("Unsupported parameters") {
                         ForEach(unsupported, id: \.self) { pid in
                             Text(pid.description).font(DL.Font.caption.monospaced())
                         }
@@ -128,7 +128,8 @@ struct DebugCenterView: View {
                 Text("No values yet.").font(DL.Font.callout).foregroundStyle(DLColor.secondaryText)
             } else {
                 ForEach(VehicleMetric.allCases, id: \.self) { metric in
-                    if let entry = telemetry.entry(metric) {
+                    if let entry = telemetry.lastKnownEntry(metric) {
+                        VStack(alignment: .leading) {
                         HStack {
                             Text(metric.displayName).font(DL.Font.caption)
                             Spacer()
@@ -139,6 +140,15 @@ struct DebugCenterView: View {
                                 .font(DL.Font.caption)
                                 .foregroundStyle(DLColor.unknown)
                         }
+                        Text("\(entry.provenance.label) · \(telemetry.sensorState(metric, freshWithin: 60, now: Date()).label) · last known")
+                            .font(DL.Font.caption)
+                            .foregroundStyle(DLColor.secondaryText)
+                        }
+                    }
+                    if let reason = telemetry.rejectionReason(metric) {
+                        Text("\(metric.displayName): \(reason)")
+                            .font(DL.Font.caption)
+                            .foregroundStyle(DLColor.watch)
                     }
                 }
             }

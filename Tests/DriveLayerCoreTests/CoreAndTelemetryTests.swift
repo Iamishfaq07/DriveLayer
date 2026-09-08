@@ -100,8 +100,8 @@ final class VehicleTelemetryTests: XCTestCase {
     func testStaleValuesAreNotReturnedAsCurrent() {
         var telemetry = VehicleTelemetry(updatedAt: now)
         telemetry.set(.coolantTemperatureC, value: 92, at: now.addingTimeInterval(-240))
-        XCTAssertNotNil(telemetry.value(.coolantTemperatureC))
-        XCTAssertNil(telemetry.value(.coolantTemperatureC, freshWithin: 60, now: now))
+        XCTAssertNotNil(telemetry.lastKnownValue(.coolantTemperatureC))
+        XCTAssertNil(telemetry.trustedValue(.coolantTemperatureC, freshWithin: 60, now: now))
     }
 
     func testImplausibleReadingsAreNotApplied() {
@@ -109,7 +109,7 @@ final class VehicleTelemetryTests: XCTestCase {
         let reading = OBDReading(pid: .current(0x0C), name: "Engine speed", metric: .engineRPM,
                                 value: .number(16_000), unitLabel: "rpm", timestamp: now, isPlausible: false)
         telemetry.apply(reading)
-        XCTAssertNil(telemetry.value(.engineRPM))
+        XCTAssertNil(telemetry.lastKnownValue(.engineRPM))
     }
 
     func testEngineRunningIsUnknownWithoutEvidence() {
@@ -128,7 +128,7 @@ final class VehicleTelemetryTests: XCTestCase {
 
     func testMissingMetricIsUnavailableNotZero() {
         let telemetry = VehicleTelemetry(updatedAt: now)
-        XCTAssertEqual(telemetry.provenanced(.fuelLevelPercent).provenance, .unavailable)
+        XCTAssertEqual(telemetry.provenancedTrustedReading(.fuelLevelPercent, freshWithin: 60, now: telemetry.updatedAt).provenance, .unavailable)
     }
 }
 

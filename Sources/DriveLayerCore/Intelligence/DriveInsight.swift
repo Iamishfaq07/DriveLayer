@@ -204,7 +204,7 @@ struct InsightContext: Sendable {
     }
 
     func value(_ metric: VehicleMetric, freshWithin interval: TimeInterval = 30) -> Double? {
-        telemetry?.value(metric, freshWithin: interval, now: now)
+        telemetry?.trustedValue(metric, freshWithin: interval, now: now)
     }
 }
 

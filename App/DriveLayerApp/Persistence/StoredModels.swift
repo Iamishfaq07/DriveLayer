@@ -286,6 +286,9 @@ enum StoredCoding {
     }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        // Inspect metadata before trying this build's payload shape. A newer payload
+        // may no longer decode as T, but it must still be identified as forward-version.
+        try checkSupported(version(of: data))
         // An envelope is tried first; a bare payload is pre-versioning data, not an error.
         // Deliberately ordered this way round because the envelope is the common case and
         // the legacy read is the fallback, which is also the direction that stops being

@@ -58,7 +58,8 @@ enum TelemetrySeriesCodec {
         .absoluteLoadPercent,
         .acceleratorPedalPercent,
         .massAirFlowGramsPerSecond,
-        .timingAdvanceDegrees
+        .timingAdvanceDegrees,
+        .intakeAmbientDeltaC
     ]
 
     /// Quantisation step per metric. Chosen so the full plausible range fits in Int16

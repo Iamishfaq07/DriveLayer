@@ -169,6 +169,7 @@ enum BaselineEngine {
                            value: Double,
                            at timestamp: Date,
                            calendar: Calendar = .current) {
+        guard value.isFinite else { return }
         let dayStart = calendar.startOfDay(for: timestamp)
         if let index = aggregates.firstIndex(where: { $0.key == key && $0.dayStart == dayStart }) {
             aggregates[index].add(value)
