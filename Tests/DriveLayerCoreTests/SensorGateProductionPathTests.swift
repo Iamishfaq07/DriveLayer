@@ -93,7 +93,8 @@ final class SensorGateProductionPathTests: XCTestCase {
                             plausibleRange: plausibleRange(0x05))
 
         let sample = telemetry.sample(at: start.addingTimeInterval(1))
-        XCTAssertEqual(sample[.coolantTemperatureC], 90, "the impossible value must not be stored")
+        XCTAssertNil(sample[.coolantTemperatureC], "neither the rejected value nor its suspect held predecessor may enter a sample")
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 90, "diagnostics retain the last accepted value")
     }
 
     /// A metric whose very first reading is rejected must stay absent - not present as 0.
