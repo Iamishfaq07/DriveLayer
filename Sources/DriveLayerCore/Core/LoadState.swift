@@ -96,6 +96,8 @@ enum UnavailabilityReason: Equatable, Sendable {
             return "The drive is short enough that the weather where you are is the weather when you arrive."
         case .waitingForLocationFix:
             return "Waiting for a GPS fix. This usually takes a few seconds outdoors."
+        case .diagnosticScanIncomplete:
+            return "The adapter did not complete every diagnostic request, so DriveLayer cannot confirm that no faults are present."
         }
     }
 }
