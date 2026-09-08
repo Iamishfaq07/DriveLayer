@@ -232,14 +232,14 @@ final class VehicleHealthTests: XCTestCase {
                                                            .controlModuleVoltageV: 14.1,
                                                            .engineRPM: 1_600,
                                                            .engineLoadPercent: 38]),
-                                     maintenanceStatuses: [],
-                                     fuelStatus: FuelIntelligence.status(levelPercent: .measured(58),
-                                                                        tankCapacityLitres: 50,
-                                                                        economy: (12.8, .recentTrips)),
                                      diagnosticSnapshot: DiagnosticSnapshot(
                                         storedStatus: .successful,
                                         pendingStatus: .successful,
-                                        permanentStatus: .successful))
+                                        permanentStatus: .successful),
+                                     maintenanceStatuses: [],
+                                     fuelStatus: FuelIntelligence.status(levelPercent: .measured(58),
+                                                                        tankCapacityLitres: 50,
+                                                                        economy: (12.8, .recentTrips)))
         let report = VehicleHealthEvaluator.evaluate(context)
         XCTAssertEqual(try XCTUnwrap(report.system(.engine)).status, .normal)
         XCTAssertEqual(try XCTUnwrap(report.system(.battery)).status, .normal)
