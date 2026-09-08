@@ -119,6 +119,7 @@ struct VehicleContextSnapshot: Sendable, Equatable {
     var hyperion: HyperionSummary?
     var recentInsights: [String] = []
     var activeTroubleCodes: [String] = []
+    var diagnosticsSummary: String = "Diagnostics unavailable"
     var batteryBaselineV: Double?
     var batteryTrendVPerWindow: Double?
     var isDriving: Bool = false
@@ -202,6 +203,7 @@ enum CopilotContextBuilder {
             hyperion: hyperion.map(summarise),
             recentInsights: insights.prefix(5).map { "\($0.title): \($0.summary)" },
             activeTroubleCodes: context.troubleCodes.map(\.code),
+            diagnosticsSummary: context.diagnosticSnapshot.summary,
             batteryBaselineV: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.median,
             batteryTrendVPerWindow: context.bestBaseline(.controlModuleVoltageV, preferring: .engineOff)?.trendOverWindow,
             isDriving: context.isDriving

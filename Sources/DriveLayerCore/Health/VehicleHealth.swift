@@ -172,24 +172,26 @@ enum VehicleHealthEvaluator {
                                        headline: "Connect an adapter to read trouble codes",
                                        detail: nil, dataPoints: [], unavailability: .obdNotConnected)
         }
-        guard !context.troubleCodes.isEmpty else {
-            return VehicleHealthSystem(kind: .diagnostics, status: .normal,
-                                       headline: "No active trouble codes",
-                                       detail: nil, dataPoints: [], unavailability: nil)
+        if !context.troubleCodes.isEmpty {
+            let explanations = context.troubleCodes.map { DTCCatalog.explanation(for: $0.code) }
+            let worst = explanations.map(\.seriousness.status).max() ?? .watch
+            let count = context.troubleCodes.count
+            return VehicleHealthSystem(
+                kind: .diagnostics,
+                status: worst,
+                headline: "\(count) code\(count == 1 ? "" : "s") stored",
+                detail: context.troubleCodes.map(\.code).joined(separator: ", "),
+                dataPoints: context.troubleCodes.prefix(3).map { .measured($0.code, $0.status.displayName) },
+                unavailability: nil)
         }
-        let explanations = context.troubleCodes.map { DTCCatalog.explanation(for: $0.code) }
-        let worst = explanations.map(\.seriousness.status).max() ?? .watch
-        let count = context.troubleCodes.count
-        return VehicleHealthSystem(
-            kind: .diagnostics,
-            status: worst,
-            headline: "\(count) code\(count == 1 ? "" : "s") stored",
-            detail: context.troubleCodes.map(\.code).joined(separator: ", "),
-            dataPoints: context.troubleCodes.prefix(3).map {
-                .measured($0.code, $0.status.displayName)
-            },
-            unavailability: nil
-        )
+        guard context.diagnosticSnapshot.hasSuccessfulZeroCodeScan else {
+            return VehicleHealthSystem(kind: .diagnostics, status: .unknown,
+                                       headline: context.diagnosticSnapshot.summary,
+                                       detail: nil, dataPoints: [], unavailability: .diagnosticScanIncomplete)
+        }
+        return VehicleHealthSystem(kind: .diagnostics, status: .normal,
+                                   headline: context.diagnosticSnapshot.summary,
+                                   detail: nil, dataPoints: [], unavailability: nil)
     }
 
     private static func dieselUsage(_ context: InsightContext) -> VehicleHealthSystem? {

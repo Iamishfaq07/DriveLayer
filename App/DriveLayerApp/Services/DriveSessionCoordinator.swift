@@ -670,6 +670,7 @@ final class DriveSessionCoordinator {
                                      currentWeather: currentWeather,
                                      weatherChanges: weatherChanges,
                                      troubleCodes: obd.troubleCodes,
+                                     diagnosticSnapshot: obd.diagnosticSnapshot,
                                      maintenanceStatuses: maintenance,
                                      documents: store.documents(vehicleID: vehicle.id),
                                      fuelStatus: fuelStatus,
@@ -722,6 +723,7 @@ final class DriveSessionCoordinator {
                                      currentWeather: currentWeather,
                                      weatherChanges: weatherChanges,
                                      troubleCodes: obd.troubleCodes,
+                                     diagnosticSnapshot: obd.diagnosticSnapshot,
                                      maintenanceStatuses: MaintenanceEngine.statuses(
                                         for: store.maintenanceItems(vehicleID: vehicle.id),
                                         currentOdometerKm: vehicle.odometerKm,

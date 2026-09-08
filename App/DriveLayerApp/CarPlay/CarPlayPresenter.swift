@@ -33,7 +33,7 @@ final class CarPlayPresenter {
     private let vehicleGrid = CPGridTemplate(title: "Vehicle", gridButtons: [])
     private let tripGrid = CPGridTemplate(title: "Trip", gridButtons: [])
     private let aheadGrid = CPGridTemplate(title: "Ahead", gridButtons: [])
-    private let copilotList = CPListTemplate(title: "Ask Harrier", sections: [])
+    private let copilotList = CPListTemplate(title: "Ask", sections: [])
 
     /// The one critical insight already popped as an alert, so a condition that
     /// persists across refreshes does not interrupt again every ten seconds - only a
@@ -66,7 +66,7 @@ final class CarPlayPresenter {
         aheadGrid.tabTitle = "Ahead"
         aheadGrid.tabImage = UIImage(systemName: "binoculars.fill")
 
-        copilotList.tabTitle = "Ask Harrier"
+        copilotList.tabTitle = "Ask"
         copilotList.tabImage = UIImage(systemName: "questionmark.bubble.fill")
         copilotList.emptyViewTitleVariants = ["DriveLayer"]
         copilotList.emptyViewSubtitleVariants = ["Open DriveLayer on your iPhone to add a vehicle."]
@@ -292,7 +292,7 @@ final class CarPlayPresenter {
         return padded
     }
 
-    // MARK: - Ask Harrier
+    // MARK: - Ask
 
     /// All of the copilot's example questions, not a shortened preview of them - each
     /// one already routes to a real, non-stub answer, the same ones the phone app's
@@ -319,7 +319,7 @@ final class CarPlayPresenter {
             }
             return item
         }
-        return CPListSection(items: items, header: "Ask Harrier", sectionIndexTitle: nil)
+        return CPListSection(items: items, header: "Ask", sectionIndexTitle: nil)
     }
 
     /// A question whose answer is already computed. The rule matcher answers these

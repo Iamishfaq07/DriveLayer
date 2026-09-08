@@ -375,7 +375,11 @@ extension BluetoothOBDTransport: CBCentralManagerDelegate {
         // only durable evidence that the link went away rather than never existing.
         if !isDisconnectingIntentionally { didLoseConnection = true }
         failPendingRequest(with: .connectionLost)
-        completeConnection(.failure(OBDError.connectionLost))
+        if pendingConnection != nil {
+            completeConnection(.failure(OBDError.connectionLost))
+        } else {
+            clearConnection()
+        }
     }
 }
 

@@ -44,6 +44,7 @@ enum UnavailabilityReason: Equatable, Sendable {
     /// Location is permitted, but no fix has arrived yet. Distinct from a permission
     /// problem: nothing is wrong and there is nothing for the driver to do.
     case waitingForLocationFix
+    case diagnosticScanIncomplete
 
     var title: String {
         switch self {
@@ -61,6 +62,7 @@ enum UnavailabilityReason: Equatable, Sendable {
         case .routeUnavailable: return "No route available"
         case .routeTooShortForForecast: return "Too close to forecast"
         case .waitingForLocationFix: return "Finding your location"
+        case .diagnosticScanIncomplete: return "Diagnostic scan incomplete"
         }
     }
 
