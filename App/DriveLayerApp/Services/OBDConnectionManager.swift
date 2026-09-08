@@ -46,6 +46,13 @@ final class OBDConnectionManager {
     /// What to tell the driver while that is happening.
     private(set) var reconnectStatus: String?
 
+    private let transportFactory: ((Source) -> OBDTransport)?
+
+    init(transportFactory: ((Source) -> OBDTransport)? = nil) {
+        self.transportFactory = transportFactory
+    }
+
+    private var connectionGeneration = 0
     private var session: OBDSession?
     private var transport: OBDTransport?
     private var pollingTask: Task<Void, Never>?
@@ -72,16 +79,23 @@ final class OBDConnectionManager {
         // teardown, not disconnect: disconnect() cancels supervision, and this is the
         // call supervision itself makes. Cancelling from inside would stop the ladder
         // after its first attempt.
+        connectionGeneration += 1
+        let generation = connectionGeneration
         await teardown()
+        guard generation == connectionGeneration, !Task.isCancelled else { return }
         isIntentionallyDisconnected = false
         self.source = source
 
         let transport: OBDTransport
+        if let transportFactory {
+            transport = transportFactory(source)
+        } else {
         switch source {
         case let .bluetooth(peripheralID, name):
             transport = BluetoothOBDTransport(peripheralID: peripheralID, displayName: name)
         case let .simulator(scenario):
             transport = SimulatedOBDTransport(scenario: scenario)
+        }
         }
         self.transport = transport
 
@@ -91,19 +105,38 @@ final class OBDConnectionManager {
 
         do {
             try await session.start()
-            state = await session.state
-            capabilities = await session.capabilities
-            adapterIdentity = await session.adapterIdentity
-            protocolDescription = await session.protocolDescription
-            adapterVoltage = await session.readAdapterVoltage()
+            let connectedState = await session.state
+            let report = await session.capabilities
+            let identity = await session.adapterIdentity
+            let protocolName = await session.protocolDescription
+            let voltage = await session.readAdapterVoltage()
+            guard generation == connectionGeneration, !Task.isCancelled else {
+                await session.stop()
+                return
+            }
+            state = connectedState
+            capabilities = report
+            adapterIdentity = identity
+            protocolDescription = protocolName
+            adapterVoltage = source.isSimulated
+                ? Provenanced(value: voltage.value, provenance: .simulated, timestamp: voltage.timestamp, basis: voltage.basis)
+                : voltage
             reconnectAttempt = nil
             reconnectStatus = nil
             startPolling()
             await refreshTroubleCodes()
         } catch let error as OBDError {
+            await session.stop()
+            guard generation == connectionGeneration else { return }
+            await teardown()
+            guard generation == connectionGeneration else { return }
             state = .failed(error)
             note(error.userMessage)
         } catch {
+            await session.stop()
+            guard generation == connectionGeneration else { return }
+            await teardown()
+            guard generation == connectionGeneration else { return }
             state = .failed(.connectionFailed(error.localizedDescription))
             note(error.localizedDescription)
         }
@@ -113,7 +146,7 @@ final class OBDConnectionManager {
     private func teardown() async {
         pollingTask?.cancel()
         pollingTask = nil
-        await session?.stop()
+        let oldSession = session
         session = nil
         transport = nil
         state = .disconnected
@@ -122,14 +155,19 @@ final class OBDConnectionManager {
         // accepted coolant temperature is not a baseline for judging the next one's rate
         // of change, and it may not even be the same car.
         telemetry = VehicleTelemetry(updatedAt: .distantPast)
-troubleCodes = []
+        troubleCodes = []
         monitorStatus = nil
+        lastMonitorCode = nil
+        adapterIdentity = nil
+        protocolDescription = nil
         adapterVoltage = .unavailable()
         lastRead.removeAll()
+        await oldSession?.stop()
     }
 
     /// Disconnects and stops trying to come back. Distinct from a dropped link.
     func disconnect() async {
+        connectionGeneration += 1
         isIntentionallyDisconnected = true
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -218,8 +256,10 @@ troubleCodes = []
 
         for descriptor in due {
             guard !Task.isCancelled else { return }
+            guard await session.canPoll(descriptor.pid) else { continue }
             do {
                 let reading = try await session.read(descriptor.pid)
+                guard self.session === session, !Task.isCancelled else { return }
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
                 // Source.isSimulated existed and was used only for display. This is the
                 // place it actually matters.
@@ -241,6 +281,7 @@ troubleCodes = []
                     note("\(reading.name) was ignored: \(explanation).")
                 }
             } catch let error as OBDError {
+                guard self.session === session, !Task.isCancelled else { return }
                 if let code = descriptor.pid.code { lastRead[code] = Date() }
                 if case .connectionLost = error {
                     // Supervised, not abandoned. The drive carries on phone-only.
@@ -254,7 +295,9 @@ troubleCodes = []
                 note(error.localizedDescription)
             }
         }
-        state = await session.state
+        let polledState = await session.state
+        guard self.session === session else { return }
+        state = polledState
     }
 
     // MARK: - Diagnostics
@@ -289,12 +332,15 @@ troubleCodes = []
     func refreshTroubleCodes() async {
         guard let session else { return }
         let result = await session.readDiagnosticCodes()
+        guard self.session === session, !Task.isCancelled else { return }
         troubleCodes = result.codes
         for note in result.notes { self.note(note) }
         // Read together: the stored codes and the vehicle's summary of them are answers to
         // the same question, and showing one refreshed and the other stale is how a screen
         // ends up contradicting itself.
-        monitorStatus = await session.readMonitorStatus()
+        let monitor = await session.readMonitorStatus()
+        guard self.session === session, !Task.isCancelled else { return }
+        monitorStatus = monitor
     }
 
     func refreshAdapterVoltage() async {

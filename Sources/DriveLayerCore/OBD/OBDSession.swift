@@ -20,10 +20,11 @@ actor OBDSession {
     /// PIDs this vehicle answered "no" to. Asking again every second wastes bus time.
     private var knownUnsupported: Set<OBDPID> = []
     private var consecutiveTransientFailures: [OBDPID: Int] = [:]
+    private var retryAfter: [OBDPID: Date] = [:]
     /// Set when repeated transient failures suggest the link is unhealthy.
     private var degradedReason: String?
 
-    /// After this many transient failures a PID is rested until the next session.
+    /// Repeated failures degrade the session, but never erase a supported PID.
     private let transientFailureLimit = 5
 
     init(transport: OBDTransport,
@@ -86,6 +87,7 @@ actor OBDSession {
     func resetLearnedState() {
         knownUnsupported.removeAll()
         consecutiveTransientFailures.removeAll()
+        retryAfter.removeAll()
         capabilities = nil
         degradedReason = nil
     }
@@ -99,6 +101,7 @@ actor OBDSession {
     func request(_ pid: OBDPID, respectingCapabilities: Bool = true) async throws -> OBDResponse {
         if respectingCapabilities {
             if knownUnsupported.contains(pid) { throw OBDError.pidNotSupported(pid) }
+            if let retry = retryAfter[pid], dateProvider.now < retry { throw OBDError.timeout }
             // canAttempt, not supports: an unknown diagnostic mode must still be asked.
             if let capabilities, !capabilities.canAttempt(pid) { throw OBDError.pidNotSupported(pid) }
         }
@@ -106,8 +109,9 @@ actor OBDSession {
         do {
             let raw = try await sendRaw(pid.requestString)
             let response = try OBDResponseParser.parse(raw: raw, for: pid)
-            consecutiveTransientFailures[pid] = 0
-            if degradedReason != nil, case .degraded = state {
+            consecutiveTransientFailures.removeValue(forKey: pid)
+            retryAfter.removeValue(forKey: pid)
+            if retryAfter.isEmpty, degradedReason != nil, case .degraded = state {
                 degradedReason = nil
                 state = .ready
             }
@@ -275,16 +279,21 @@ actor OBDSession {
         let count = (consecutiveTransientFailures[pid] ?? 0) + 1
         consecutiveTransientFailures[pid] = count
         if count >= transientFailureLimit {
-            knownUnsupported.insert(pid)
             let reason = "\(OBDPIDCatalog.descriptor(for: pid)?.shortName ?? pid.description) stopped answering"
             degradedReason = reason
             if state.isUsable { state = .degraded(reason: reason) }
         }
+        let cooldown = min(60.0, pow(2.0, Double(min(count, 6))))
+        retryAfter[pid] = dateProvider.now.addingTimeInterval(cooldown)
     }
 
     // MARK: - Introspection for the Debug Center
 
     var unsupportedPIDs: [OBDPID] { knownUnsupported.sorted { $0.description < $1.description } }
+    func canPoll(_ pid: OBDPID) -> Bool {
+        !knownUnsupported.contains(pid) && (retryAfter[pid].map { dateProvider.now >= $0 } ?? true)
+    }
+    func retryDate(for pid: OBDPID) -> Date? { retryAfter[pid] }
 }
 
 /// Maps `ATDPN` replies to readable protocol names.
