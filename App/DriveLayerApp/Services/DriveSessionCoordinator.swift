@@ -520,6 +520,9 @@ final class DriveSessionCoordinator {
             peakIntakeDeltaC = HeatSoakAnalyser.updatedPeak(current: peakIntakeDeltaC,
                                                            delta: intakeValue - ambient)
         }
+        let baselineContext = BaselineObservationCollector.context(
+            telemetry: obd.telemetry, now: now, gradientPercent: gradient?.percent
+        )
 
         return HyperionGuardian.assess(
             coolantC: provenancedReading(.coolantTemperatureC, freshWithin: 60, now: now),
@@ -537,6 +540,13 @@ final class DriveSessionCoordinator {
                 .flatMap { baselines[BaselineKey(metric: .intakeAmbientDeltaC, context: $0)] },
             fuelSystem: obd.telemetry.trustedValue(.fuelSystemStatusCode, freshWithin: 30, now: now)
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
+            shortTermFuelTrim: provenancedReading(.shortTermFuelTrimPercent, freshWithin: 15, now: now),
+            longTermFuelTrim: provenancedReading(.longTermFuelTrimPercent, freshWithin: 15, now: now),
+            isWarmedCruise: baselineContext == .cruising,
+            shortTermFuelTrimBaseline: baselines[BaselineKey(metric: .shortTermFuelTrimPercent,
+                                                              context: .cruising)],
+            longTermFuelTrimBaseline: baselines[BaselineKey(metric: .longTermFuelTrimPercent,
+                                                             context: .cruising)],
             // The structured read first, because only it carries readiness. The telemetry
             // value is the fallback: it is refreshed far more often, so it is the one that
             // notices a lamp coming on between diagnostic reads.

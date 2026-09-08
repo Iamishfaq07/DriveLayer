@@ -25,12 +25,13 @@ final class WarmUpSessionTrackerTests: XCTestCase {
         var tracker = WarmUpSessionTracker()
         let now = Date()
         XCTAssertNil(tracker.ingest(at: now,
-                                    coolant: .simulated(30, at: now),
-                                    ambient: .simulated(25, at: now),
+                                    coolant: Provenanced(value: 30, provenance: .simulated, timestamp: now),
+                                    ambient: Provenanced(value: 25, provenance: .simulated, timestamp: now),
                                     rpm: 900, speedKmh: 0, engineRunning: true, profile: nil))
         XCTAssertNil(tracker.ingest(at: now.addingTimeInterval(300),
-                                    coolant: .simulated(82, at: now.addingTimeInterval(300)),
-                                    ambient: .simulated(25, at: now),
+                                    coolant: Provenanced(value: 82, provenance: .simulated,
+                                                        timestamp: now.addingTimeInterval(300)),
+                                    ambient: Provenanced(value: 25, provenance: .simulated, timestamp: now),
                                     rpm: 1_800, speedKmh: 60, engineRunning: true, profile: nil))
     }
 
