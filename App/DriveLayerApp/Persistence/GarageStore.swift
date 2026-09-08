@@ -134,6 +134,7 @@ final class GarageStore {
             try context.delete(model: StoredServiceRecord.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredRoadEvent.self, where: #Predicate { $0.vehicleID == vehicleID })
+            try context.delete(model: StoredWarmUpObservation.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredDocument.self, where: #Predicate { $0.vehicleID == optionalVehicleID })
             try context.delete(model: StoredVehicle.self, where: #Predicate { $0.id == vehicleID })
         }
@@ -365,6 +366,27 @@ final class GarageStore {
                          description: "Loading road events") { try $0.value() }
     }
 
+    // MARK: - Warm-up learning
+
+    func warmUpObservations(vehicleID: UUID, limit: Int = 60) -> [WarmUpObservation] {
+        var descriptor = FetchDescriptor<StoredWarmUpObservation>(
+            predicate: #Predicate { $0.vehicleID == vehicleID },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        return decodeAll(fetch(descriptor, description: "Loading warm-up history"),
+                         description: "Loading warm-up history") { try $0.value() }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    func add(warmUp observation: WarmUpObservation, vehicleID: UUID) {
+        let history = warmUpObservations(vehicleID: vehicleID)
+        guard EngineThermalModel.record(observation, into: history).count > history.count else { return }
+        perform("Saving warm-up observation") {
+            context.insert(try StoredWarmUpObservation(vehicleID: vehicleID, observation: observation))
+        }
+    }
+
     // MARK: - Privacy controls
 
     /// Removes every record the app holds. Backs "Delete all data" in settings.
@@ -377,6 +399,7 @@ final class GarageStore {
             try context.delete(model: StoredDocument.self)
             try context.delete(model: StoredBaselineAggregate.self)
             try context.delete(model: StoredRoadEvent.self)
+            try context.delete(model: StoredWarmUpObservation.self)
             try context.delete(model: StoredOBDDevice.self)
             try context.delete(model: StoredVehicle.self)
         }
@@ -397,6 +420,7 @@ final class GarageStore {
             /// Included because these carry coordinates. An export that quietly left
             /// out a location-bearing record type would not be the whole truth.
             var roadEvents: [RoadImpactEvent]
+            var warmUpObservations: [WarmUpObservation]
         }
         let bundle = ExportBundle(exportedAt: Date(),
                                   vehicle: vehicles().first { $0.id == vehicleID },
@@ -405,7 +429,8 @@ final class GarageStore {
                                   maintenanceItems: maintenanceItems(vehicleID: vehicleID),
                                   serviceRecords: serviceRecords(vehicleID: vehicleID),
                                   documents: documents(vehicleID: vehicleID),
-                                  roadEvents: roadEvents(vehicleID: vehicleID))
+                                  roadEvents: roadEvents(vehicleID: vehicleID),
+                                  warmUpObservations: warmUpObservations(vehicleID: vehicleID))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

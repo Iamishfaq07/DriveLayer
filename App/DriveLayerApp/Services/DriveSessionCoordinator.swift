@@ -73,6 +73,8 @@ final class DriveSessionCoordinator {
     private var baselineCollector = BaselineObservationCollector()
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
+    private var warmUpHistory: [WarmUpObservation] = []
+    private var warmUpTracker = WarmUpSessionTracker()
 
     /// Impacts already taken from `MotionService`, so the same jolt is not recorded
     /// twice as the loop re-reads its rolling buffer.
@@ -207,6 +209,8 @@ final class DriveSessionCoordinator {
         peakIntakeDeltaC = nil
         insights.removeAll()
         baselines = [:]
+        warmUpTracker.reset()
+        warmUpHistory = vehicle.map { store.warmUpObservations(vehicleID: $0.id) } ?? []
         recorder = vehicle.map { makeRecorder(for: $0) }
         reloadBaselines()
         recoverInterruptedTrips()
@@ -361,6 +365,7 @@ final class DriveSessionCoordinator {
         if isRecording, let telemetry {
             collectTelemetry(telemetry, at: now)
         }
+        collectWarmUpObservation(from: telemetry, at: now)
         collectRoadImpacts(into: &recorder)
         self.recorder = recorder
         checkpoint(now: now)
@@ -526,10 +531,7 @@ final class DriveSessionCoordinator {
             idleSeconds: currentTrip?.idleDurationSeconds,
             runtimeSeconds: currentTrip.map { now.timeIntervalSince($0.startedAt) },
             peakIntakeDeltaC: peakIntakeDeltaC,
-            // Warm-up history is not stored per drive yet; that is its own P1 item, and
-            // passing an empty history simply means no comparison is offered rather than
-            // a comparison being invented.
-            warmUpHistory: [],
+            warmUpHistory: warmUpHistory,
             intakeDeltaBaseline: BaselineObservationCollector.context(telemetry: obd.telemetry, now: now,
                                                                        gradientPercent: gradient?.percent)
                 .flatMap { baselines[BaselineKey(metric: .intakeAmbientDeltaC, context: $0)] },
@@ -558,6 +560,27 @@ final class DriveSessionCoordinator {
 
         baselineCollector.collect(telemetry, at: now, gradientPercent: gradient?.percent,
                                   into: &pendingBaselines)
+    }
+
+    private func collectWarmUpObservation(from telemetry: VehicleTelemetry?, at now: Date) {
+        guard let vehicle, let telemetry, obd.source?.isSimulated != true else {
+            warmUpTracker.reset()
+            return
+        }
+        let coolant = telemetry.provenancedTrustedReading(.coolantTemperatureC, freshWithin: 10, now: now)
+        let ambient = telemetry.provenancedTrustedReading(.ambientAirTemperatureC, freshWithin: 300, now: now)
+        if let observation = warmUpTracker.ingest(
+            at: now,
+            coolant: coolant,
+            ambient: ambient,
+            rpm: telemetry.trustedValue(.engineRPM, freshWithin: 10, now: now),
+            speedKmh: telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 10, now: now),
+            engineRunning: telemetry.isEngineRunning(now: now),
+            profile: profile
+        ) {
+            warmUpHistory = EngineThermalModel.record(observation, into: warmUpHistory)
+            store.add(warmUp: observation, vehicleID: vehicle.id)
+        }
     }
 
     /// Writes the live drive and its telemetry to disk.

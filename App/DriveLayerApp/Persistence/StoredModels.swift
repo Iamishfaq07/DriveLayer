@@ -228,6 +228,27 @@ final class StoredRoadEvent {
     func value() throws -> RoadImpactEvent { try StoredCoding.decode(RoadImpactEvent.self, from: payload) }
 }
 
+/// One completed, real-vehicle warm-up. Vehicle scoping is a column so changing the
+/// selected car can never mix learned behaviour between engines.
+@Model
+final class StoredWarmUpObservation {
+    @Attribute(.unique) var identifier: String
+    var vehicleID: UUID
+    var startedAt: Date
+    var payload: Data
+
+    init(vehicleID: UUID, observation: WarmUpObservation) throws {
+        self.identifier = "\(vehicleID.uuidString)|\(observation.startedAt.timeIntervalSince1970)"
+        self.vehicleID = vehicleID
+        self.startedAt = observation.startedAt
+        self.payload = try StoredCoding.encode(observation)
+    }
+
+    func value() throws -> WarmUpObservation {
+        try StoredCoding.decode(WarmUpObservation.self, from: payload)
+    }
+}
+
 /// Encodes and decodes the domain values stored inside each record.
 ///
 /// Payloads carry their version. They did not before, and the comment on
@@ -332,6 +353,7 @@ enum DriveLayerSchema {
         StoredDocument.self,
         StoredBaselineAggregate.self,
         StoredOBDDevice.self,
-        StoredRoadEvent.self
+        StoredRoadEvent.self,
+        StoredWarmUpObservation.self
     ]
 }
