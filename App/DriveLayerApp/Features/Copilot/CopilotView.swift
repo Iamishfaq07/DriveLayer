@@ -70,7 +70,7 @@ struct CopilotView: View {
                 inputBar
             }
             .background(PanelBackground())
-            .navigationTitle("Ask Harrier")
+            .navigationTitle("Ask")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

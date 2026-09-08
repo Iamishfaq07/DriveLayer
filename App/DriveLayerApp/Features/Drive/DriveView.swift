@@ -52,7 +52,7 @@ struct DriveView: View {
                     Button {
                         isShowingCopilot = true
                     } label: {
-                        Label("Ask Harrier", systemImage: "bubble.left.and.text.bubble.right")
+                        Label("Ask", systemImage: "bubble.left.and.text.bubble.right")
                     }
                 }
             }

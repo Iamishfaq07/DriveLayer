@@ -147,6 +147,7 @@ struct InsightContext: Sendable {
     var currentWeather: WeatherSnapshot?
     var weatherChanges: [WeatherChange]
     var troubleCodes: [DiagnosticTroubleCode]
+    var diagnosticSnapshot: DiagnosticSnapshot
     var maintenanceStatuses: [MaintenanceDueStatus]
     var documents: [DocumentRecord]
     var fuelStatus: FuelStatus?
@@ -167,6 +168,7 @@ struct InsightContext: Sendable {
          currentWeather: WeatherSnapshot? = nil,
          weatherChanges: [WeatherChange] = [],
          troubleCodes: [DiagnosticTroubleCode] = [],
+         diagnosticSnapshot: DiagnosticSnapshot = DiagnosticSnapshot(),
          maintenanceStatuses: [MaintenanceDueStatus] = [],
          documents: [DocumentRecord] = [],
          fuelStatus: FuelStatus? = nil,
@@ -186,6 +188,7 @@ struct InsightContext: Sendable {
         self.currentWeather = currentWeather
         self.weatherChanges = weatherChanges
         self.troubleCodes = troubleCodes
+        self.diagnosticSnapshot = diagnosticSnapshot
         self.maintenanceStatuses = maintenanceStatuses
         self.documents = documents
         self.fuelStatus = fuelStatus

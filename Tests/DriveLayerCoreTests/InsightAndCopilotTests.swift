@@ -232,6 +232,10 @@ final class VehicleHealthTests: XCTestCase {
                                                            .controlModuleVoltageV: 14.1,
                                                            .engineRPM: 1_600,
                                                            .engineLoadPercent: 38]),
+                                     diagnosticSnapshot: DiagnosticSnapshot(
+                                        storedStatus: .successful,
+                                        pendingStatus: .successful,
+                                        permanentStatus: .successful),
                                      maintenanceStatuses: [],
                                      fuelStatus: FuelIntelligence.status(levelPercent: .measured(58),
                                                                         tankCapacityLitres: 50,

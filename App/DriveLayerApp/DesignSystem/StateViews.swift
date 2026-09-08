@@ -68,6 +68,7 @@ struct DLUnavailableState: View {
         case .routeUnavailable: return "point.topleft.down.to.point.bottomright.curvepath"
         case .routeTooShortForForecast: return "arrow.right.to.line"
         case .waitingForLocationFix: return "location.magnifyingglass"
+        case .diagnosticScanIncomplete: return "stethoscope"
         }
     }
 }

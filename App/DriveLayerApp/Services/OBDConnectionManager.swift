@@ -24,6 +24,7 @@ final class OBDConnectionManager {
     private(set) var capabilities: OBDCapabilityReport?
     private(set) var telemetry = VehicleTelemetry(updatedAt: .distantPast)
     private(set) var troubleCodes: [DiagnosticTroubleCode] = []
+    private(set) var diagnosticSnapshot = DiagnosticSnapshot()
     /// The vehicle's own summary of its faults and self-tests, readiness included.
     ///
     /// Kept here beside `troubleCodes` rather than in telemetry because that is what it
@@ -156,6 +157,7 @@ final class OBDConnectionManager {
         // of change, and it may not even be the same car.
         telemetry = VehicleTelemetry(updatedAt: .distantPast)
         troubleCodes = []
+        diagnosticSnapshot = DiagnosticSnapshot()
         monitorStatus = nil
         lastMonitorCode = nil
         adapterIdentity = nil
@@ -334,6 +336,7 @@ final class OBDConnectionManager {
         let result = await session.readDiagnosticCodes()
         guard self.session === session, !Task.isCancelled else { return }
         troubleCodes = result.codes
+        diagnosticSnapshot = result.snapshot
         for note in result.notes { self.note(note) }
         // Read together: the stored codes and the vehicle's summary of them are answers to
         // the same question, and showing one refreshed and the other stale is how a screen
@@ -341,6 +344,7 @@ final class OBDConnectionManager {
         let monitor = await session.readMonitorStatus()
         guard self.session === session, !Task.isCancelled else { return }
         monitorStatus = monitor
+        diagnosticSnapshot.monitorStatus = monitor
     }
 
     func refreshAdapterVoltage() async {

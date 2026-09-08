@@ -156,9 +156,11 @@ actor OBDSession {
     /// marked `.unsupported`, and a mode that answers `NO DATA` is left `.unknown` so
     /// it is asked again next time. Nothing here is decided once and for all from the
     /// first reply.
-    func readDiagnosticCodes() async -> (codes: [DiagnosticTroubleCode], notes: [String]) {
+    func readDiagnosticCodes() async -> (codes: [DiagnosticTroubleCode], notes: [String], snapshot: DiagnosticSnapshot) {
+        let startedAt = dateProvider.now
         var codes: [DiagnosticTroubleCode] = []
         var notes: [String] = []
+        var snapshot = DiagnosticSnapshot(scanStartedAt: startedAt)
         let modes: [(OBDMode, DTCStatus)] = [
             (.storedDTCs, .stored), (.pendingDTCs, .pending), (.permanentDTCs, .permanent)
         ]
@@ -167,26 +169,62 @@ actor OBDSession {
             do {
                 let response = try await request(pid)
                 record(mode: mode, support: .supported)
-                codes.append(contentsOf: DTCDecoder.decodeList(from: response, status: status))
+                let decoded = DTCDecoder.decodeList(from: response, status: status)
+                codes.append(contentsOf: decoded)
+                switch mode {
+                case .storedDTCs: snapshot.storedStatus = .successful; snapshot.storedCodes = decoded
+                case .pendingDTCs: snapshot.pendingStatus = .successful; snapshot.pendingCodes = decoded
+                case .permanentDTCs: snapshot.permanentStatus = .successful; snapshot.permanentCodes = decoded
+                default: break
+                }
             } catch let error as OBDError {
                 switch error {
                 case .noData:
-                    // Ambiguous, so nothing is learned and nothing is ruled out.
-                    continue
+                    // NO DATA is not a clean scan: it is an unavailable mode for this attempt.
+                    switch mode {
+                    case .storedDTCs: snapshot.storedStatus = .unavailable
+                    case .pendingDTCs: snapshot.pendingStatus = .unavailable
+                    case .permanentDTCs: snapshot.permanentStatus = .unavailable
+                    default: break
+                    }
                 case .pidNotSupported:
-                    continue
+                    switch mode {
+                    case .storedDTCs: snapshot.storedStatus = .unsupported
+                    case .pendingDTCs: snapshot.pendingStatus = .unsupported
+                    case .permanentDTCs: snapshot.permanentStatus = .unsupported
+                    default: break
+                    }
                 case .negativeResponse, .unrecognisedCommand:
                     // A definite refusal, unlike NO DATA. Worth remembering.
                     record(mode: mode, support: .unsupported)
+                    switch mode {
+                    case .storedDTCs: snapshot.storedStatus = .unsupported
+                    case .pendingDTCs: snapshot.pendingStatus = .unsupported
+                    case .permanentDTCs: snapshot.permanentStatus = .unsupported
+                    default: break
+                    }
                     notes.append("Mode " + String(format: "%02X", Int(mode.rawValue)) + ": " + error.userMessage)
                 default:
+                    switch mode {
+                    case .storedDTCs: snapshot.storedStatus = .failed(error.userMessage)
+                    case .pendingDTCs: snapshot.pendingStatus = .failed(error.userMessage)
+                    case .permanentDTCs: snapshot.permanentStatus = .failed(error.userMessage)
+                    default: break
+                    }
                     notes.append("Mode " + String(format: "%02X", Int(mode.rawValue)) + ": " + error.userMessage)
                 }
             } catch {
-                continue
+                let message = error.localizedDescription
+                switch mode {
+                case .storedDTCs: snapshot.storedStatus = .failed(message)
+                case .pendingDTCs: snapshot.pendingStatus = .failed(message)
+                case .permanentDTCs: snapshot.permanentStatus = .failed(message)
+                default: break
+                }
             }
         }
-        return (codes, notes)
+        snapshot.scanCompletedAt = dateProvider.now
+        return (codes, notes, snapshot)
     }
 
     /// Whether fault codes can be reported on at all, for the UI to distinguish
