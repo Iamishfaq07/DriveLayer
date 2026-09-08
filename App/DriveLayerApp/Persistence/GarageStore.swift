@@ -135,6 +135,7 @@ final class GarageStore {
             try context.delete(model: StoredBaselineAggregate.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredRoadEvent.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredWarmUpObservation.self, where: #Predicate { $0.vehicleID == vehicleID })
+            try context.delete(model: StoredVehicleAdapter.self, where: #Predicate { $0.vehicleID == vehicleID })
             try context.delete(model: StoredDocument.self, where: #Predicate { $0.vehicleID == optionalVehicleID })
             try context.delete(model: StoredVehicle.self, where: #Predicate { $0.id == vehicleID })
         }
@@ -366,6 +367,44 @@ final class GarageStore {
                          description: "Loading road events") { try $0.value() }
     }
 
+    func rememberedAdapters(vehicleID: UUID) -> [StoredVehicleAdapter] {
+        let descriptor = FetchDescriptor<StoredVehicleAdapter>(
+            predicate: #Predicate { $0.vehicleID == vehicleID },
+            sortBy: [SortDescriptor(\.lastConnectedAt, order: .reverse)]
+        )
+        return fetch(descriptor, description: "Loading vehicle adapters")
+    }
+
+    func rememberAdapter(vehicleID: UUID, deviceIdentifier: String, name: String,
+                         adapter: String?, protocolDescription: String?) {
+        let key = "\(vehicleID.uuidString)|\(deviceIdentifier)"
+        let descriptor = FetchDescriptor<StoredVehicleAdapter>(predicate: #Predicate { $0.identifier == key })
+        perform("Saving the vehicle adapter") {
+            for record in try context.fetch(FetchDescriptor<StoredVehicleAdapter>(
+                predicate: #Predicate { $0.vehicleID == vehicleID })) {
+                record.isPreferred = false
+            }
+            let record: StoredVehicleAdapter
+            if let existing = try context.fetch(descriptor).first {
+                record = existing
+                record.name = name
+                record.lastConnectedAt = Date()
+            } else {
+                record = StoredVehicleAdapter(vehicleID: vehicleID, deviceIdentifier: deviceIdentifier,
+                                              name: name, lastConnectedAt: Date())
+                context.insert(record)
+            }
+            record.adapterDescription = adapter
+            record.protocolDescription = protocolDescription
+            record.isPreferred = true
+        }
+    }
+
+    func preferredAdapter(vehicleID: UUID) -> StoredVehicleAdapter? {
+        rememberedAdapters(vehicleID: vehicleID).first { $0.isPreferred }
+            ?? rememberedAdapters(vehicleID: vehicleID).first
+    }
+
     // MARK: - Warm-up learning
 
     func warmUpObservations(vehicleID: UUID, limit: Int = 60) -> [WarmUpObservation] {
@@ -401,6 +440,7 @@ final class GarageStore {
             try context.delete(model: StoredRoadEvent.self)
             try context.delete(model: StoredWarmUpObservation.self)
             try context.delete(model: StoredOBDDevice.self)
+            try context.delete(model: StoredVehicleAdapter.self)
             try context.delete(model: StoredVehicle.self)
         }
         TelemetryFileStore.shared.deleteEverything()

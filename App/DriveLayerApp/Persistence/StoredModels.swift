@@ -228,6 +228,29 @@ final class StoredRoadEvent {
     func value() throws -> RoadImpactEvent { try StoredCoding.decode(RoadImpactEvent.self, from: payload) }
 }
 
+/// A validated adapter relationship belonging to one vehicle. The older global row
+/// remains in the schema only so existing installs can be migrated safely.
+@Model
+final class StoredVehicleAdapter {
+    @Attribute(.unique) var identifier: String
+    var vehicleID: UUID
+    var deviceIdentifier: String
+    var name: String
+    var lastConnectedAt: Date
+    var adapterDescription: String?
+    var protocolDescription: String?
+    var isPreferred: Bool
+
+    init(vehicleID: UUID, deviceIdentifier: String, name: String, lastConnectedAt: Date) {
+        self.identifier = "\(vehicleID.uuidString)|\(deviceIdentifier)"
+        self.vehicleID = vehicleID
+        self.deviceIdentifier = deviceIdentifier
+        self.name = name
+        self.lastConnectedAt = lastConnectedAt
+        self.isPreferred = true
+    }
+}
+
 /// One completed, real-vehicle warm-up. Vehicle scoping is a column so changing the
 /// selected car can never mix learned behaviour between engines.
 @Model
@@ -353,6 +376,7 @@ enum DriveLayerSchema {
         StoredDocument.self,
         StoredBaselineAggregate.self,
         StoredOBDDevice.self,
+        StoredVehicleAdapter.self,
         StoredRoadEvent.self,
         StoredWarmUpObservation.self
     ]

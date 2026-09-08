@@ -93,7 +93,10 @@ final class AppEnvironment {
         selectedVehicleID = vehicleID
         store.setPrimaryVehicle(id: vehicleID)
         reloadVehicles()
-        Task { await obd.reconnect() }
+        Task {
+            await obd.disconnect()
+            await connectIfPossible()
+        }
     }
 
     func add(vehicle: Vehicle) {
@@ -122,8 +125,24 @@ final class AppEnvironment {
             drive.setRouteProvider(StraightLineRouteProvider())
             return
         }
-        guard let identifier = settings.lastAdapterIdentifier, let uuid = UUID(uuidString: identifier) else { return }
-        await obd.connect(source: .bluetooth(peripheralID: uuid, name: settings.lastAdapterName ?? "OBD adapter"))
+        guard let vehicleID = selectedVehicleID else { return }
+        var saved = store.preferredAdapter(vehicleID: vehicleID)
+        // One-time compatibility path for existing installs. A legacy global adapter
+        // is assigned only to the selected vehicle, then all future reads are scoped.
+        if saved == nil,
+           let identifier = settings.lastAdapterIdentifier,
+           let uuid = UUID(uuidString: identifier) {
+            store.rememberAdapter(vehicleID: vehicleID, deviceIdentifier: identifier,
+                                  name: settings.lastAdapterName ?? "OBD adapter",
+                                  adapter: nil, protocolDescription: nil)
+            saved = store.preferredAdapter(vehicleID: vehicleID)
+            guard saved != nil else { return }
+            await obd.connect(source: .bluetooth(peripheralID: uuid, name: saved?.name ?? "OBD adapter"))
+            rememberConnectedAdapter()
+            return
+        }
+        guard let saved, let uuid = UUID(uuidString: saved.deviceIdentifier) else { return }
+        await obd.connect(source: .bluetooth(peripheralID: uuid, name: saved.name))
         rememberConnectedAdapter()
     }
 
@@ -143,8 +162,6 @@ final class AppEnvironment {
         // `obd.isConnected` is the session reporting a usable link, not CoreBluetooth
         // reporting a socket, so this is the validated state rather than a hopeful one.
         guard obd.isConnected else { return }
-        settings.lastAdapterIdentifier = id.uuidString
-        settings.lastAdapterName = name
         rememberConnectedAdapter()
     }
 
@@ -162,12 +179,14 @@ final class AppEnvironment {
 
     private func rememberConnectedAdapter() {
         guard obd.isConnected,
+              let vehicleID = selectedVehicleID,
               case let .bluetooth(peripheralID, name)? = obd.source,
               let peripheralID else { return }
-        store.remember(deviceIdentifier: peripheralID.uuidString,
-                       name: name,
-                       adapter: obd.adapterIdentity,
-                       protocolDescription: obd.protocolDescription)
+        store.rememberAdapter(vehicleID: vehicleID,
+                              deviceIdentifier: peripheralID.uuidString,
+                              name: name,
+                              adapter: obd.adapterIdentity,
+                              protocolDescription: obd.protocolDescription)
     }
 
     /// Applies the driver's retention choice to **raw telemetry**.
