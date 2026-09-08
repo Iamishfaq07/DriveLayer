@@ -489,7 +489,8 @@ jobs:
           once it finishes, and internal testers can install it immediately after
           that — no review needed.
 
-          CarPlay will **not** work in this build unless Apple has granted the
-          driving-task entitlement and docs/CARPLAY.md's two edits are applied.
-          The phone app is unaffected.
+          This build is signed for CarPlay: the check above read the entitlement
+          out of the exported binary and confirmed the CarPlay scene role survived
+          into its Info.plist. If the app still does not appear in the car, see
+          docs/RELEASE.md section 6 for the phone-side checks.
           SUMMARY
