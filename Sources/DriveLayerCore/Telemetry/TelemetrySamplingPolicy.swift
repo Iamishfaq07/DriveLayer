@@ -62,7 +62,7 @@ struct TelemetryDownsampler: Sendable {
     mutating func consider(_ telemetry: VehicleTelemetry, at now: Date) -> TelemetrySample? {
         var kept: [VehicleMetric: Double] = [:]
         for metric in telemetry.availableMetrics {
-            guard let entry = telemetry.entry(metric) else { continue }
+            guard let entry = telemetry.trustedEntry(metric, freshWithin: 30, now: now) else { continue }
             // Only consider readings that arrived recently; stale ones were already handled.
             guard now.timeIntervalSince(entry.timestamp) <= 30 else { continue }
             if policy.shouldPersist(metric: metric, value: entry.value, lastPersisted: lastPersisted[metric], now: now) {

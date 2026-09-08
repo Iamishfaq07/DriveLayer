@@ -51,14 +51,14 @@ final class SimulatorIsolationTests: XCTestCase {
     func testAppliedReadingsKeepTheProvenanceTheyWereGiven() {
         var telemetry = VehicleTelemetry(updatedAt: start)
         telemetry.apply(reading(.coolantTemperatureC, 92), provenance: .simulated)
-        XCTAssertEqual(telemetry.entry(.coolantTemperatureC)?.provenance, .simulated)
-        XCTAssertEqual(telemetry.value(.coolantTemperatureC), 92, "the value is still the value")
+        XCTAssertEqual(telemetry.lastKnownEntry(.coolantTemperatureC)?.provenance, .simulated)
+        XCTAssertEqual(telemetry.lastKnownValue(.coolantTemperatureC), 92, "the value is still the value")
     }
 
     func testApplyStillDefaultsToMeasuredForRealAdapters() {
         var telemetry = VehicleTelemetry(updatedAt: start)
         telemetry.apply(reading(.coolantTemperatureC, 92))
-        XCTAssertEqual(telemetry.entry(.coolantTemperatureC)?.provenance, .measured)
+        XCTAssertEqual(telemetry.lastKnownEntry(.coolantTemperatureC)?.provenance, .measured)
     }
 
     func testTelemetryKnowsWhenAnythingInItIsSimulated() {

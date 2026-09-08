@@ -67,7 +67,8 @@ enum FuelIntelligence {
 
         let litres = capacity * Statistics.clamp(level, 0...100) / 100
         let usableLitres = max(0, litres - capacity * unusableTankFraction)
-        let litresValue = Provenanced.estimated(litres,
+        let derivedProvenance: DataProvenance = levelPercent.provenance == .simulated ? .simulated : .estimated
+        let litresValue = Provenanced(value: litres, provenance: derivedProvenance, timestamp: levelPercent.timestamp,
                                                 basis: "From your vehicle's reported tank level and a \(Int(capacity)) L tank.")
 
         guard let economy, economy.value > 0 else {
@@ -82,7 +83,7 @@ enum FuelIntelligence {
         let range = usableLitres * economy.value
         return FuelStatus(levelPercent: levelPercent,
                           litresRemaining: litresValue,
-                          estimatedRangeKm: .estimated(range,
+                          estimatedRangeKm: Provenanced(value: range, provenance: derivedProvenance, timestamp: levelPercent.timestamp,
                                                        basis: "Based on \(economy.source.explanation), and excluding the bottom of the tank."),
                           economyKmPerLitre: economy.value,
                           economySource: economy.source,

@@ -70,6 +70,7 @@ final class DriveSessionCoordinator {
     /// terminates the app in the next moment, and because a number that stops falling is
     /// how a failing write announces itself.
     var pendingTelemetryCount: Int { pendingSamples.count }
+    private var baselineCollector = BaselineObservationCollector()
     private var pendingBaselines: [BaselineDailyAggregate] = []
     private var baselines: [BaselineKey: MetricBaseline] = [:]
 
@@ -202,6 +203,8 @@ final class DriveSessionCoordinator {
         downsampler.reset()
         pendingSamples.removeAll()
         pendingBaselines.removeAll()
+        baselineCollector.reset()
+        peakIntakeDeltaC = nil
         insights.removeAll()
         baselines = [:]
         recorder = vehicle.map { makeRecorder(for: $0) }
@@ -332,7 +335,7 @@ final class DriveSessionCoordinator {
         // unless the value actually changed.
         motion.isImpactDetectionEnabled = settings.roadImpactDetectionEnabled
 
-        let speedKmh = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now)
+        let speedKmh = telemetry?.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: now)
             ?? point?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
         motion.currentSpeedKmh = speedKmh
 
@@ -496,12 +499,8 @@ final class DriveSessionCoordinator {
     private func provenancedReading(_ metric: VehicleMetric,
                                     freshWithin seconds: TimeInterval,
                                     now: Date) -> Provenanced<Double> {
-        guard obd.isConnected,
-              let entry = obd.telemetry.entry(metric),
-              now.timeIntervalSince(entry.timestamp) <= seconds else { return .unavailable() }
-        return Provenanced(value: entry.value,
-                           provenance: entry.provenance,
-                           timestamp: entry.timestamp)
+        guard obd.isConnected else { return .unavailable(basis: "Connect an adapter to read this value.") }
+        return obd.telemetry.provenancedTrustedReading(metric, freshWithin: seconds, now: now)
     }
 
     private func assessHyperion(profile: VehicleProfile?, now: Date) -> HyperionAssessment {
@@ -511,7 +510,7 @@ final class DriveSessionCoordinator {
         }
 
         let intake = provenancedReading(.intakeAirTemperatureC, freshWithin: 30, now: now)
-        let ambient = obd.telemetry.value(.ambientAirTemperatureC, freshWithin: 300, now: now)
+        let ambient = obd.telemetry.trustedValue(.ambientAirTemperatureC, freshWithin: 300, now: now)
         if let intakeValue = intake.value, let ambient {
             peakIntakeDeltaC = HeatSoakAnalyser.updatedPeak(current: peakIntakeDeltaC,
                                                            delta: intakeValue - ambient)
@@ -522,7 +521,8 @@ final class DriveSessionCoordinator {
             oilC: provenancedReading(.oilTemperatureC, freshWithin: 60, now: now),
             intakeC: intake,
             ambientC: ambient,
-            speedKmh: obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
+            ambientReading: provenancedReading(.ambientAirTemperatureC, freshWithin: 120, now: now),
+            speedKmh: obd.telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: now),
             idleSeconds: currentTrip?.idleDurationSeconds,
             runtimeSeconds: currentTrip.map { now.timeIntervalSince($0.startedAt) },
             peakIntakeDeltaC: peakIntakeDeltaC,
@@ -530,14 +530,16 @@ final class DriveSessionCoordinator {
             // passing an empty history simply means no comparison is offered rather than
             // a comparison being invented.
             warmUpHistory: [],
-            intakeDeltaBaseline: baselines[BaselineKey(metric: .intakeAirTemperatureC, context: .any)],
-            fuelSystem: obd.telemetry.value(.fuelSystemStatusCode, freshWithin: 30, now: now)
+            intakeDeltaBaseline: BaselineObservationCollector.context(telemetry: obd.telemetry, now: now,
+                                                                       gradientPercent: gradient?.percent)
+                .flatMap { baselines[BaselineKey(metric: .intakeAmbientDeltaC, context: $0)] },
+            fuelSystem: obd.telemetry.trustedValue(.fuelSystemStatusCode, freshWithin: 30, now: now)
                 .map { FuelSystemStatus.decode(code: $0) } ?? .unknown,
             // The structured read first, because only it carries readiness. The telemetry
             // value is the fallback: it is refreshed far more often, so it is the one that
             // notices a lamp coming on between diagnostic reads.
             monitorStatus: obd.monitorStatus
-                ?? obd.telemetry.value(.monitorStatusCode, freshWithin: 120, now: now)
+                ?? obd.telemetry.trustedValue(.monitorStatusCode, freshWithin: 120, now: now)
                     .flatMap { MonitorStatus.decode(code: $0) },
             voltage: provenancedReading(.controlModuleVoltageV, freshWithin: 600, now: now),
             isEngineRunning: obd.telemetry.isEngineRunning(now: now),
@@ -554,29 +556,8 @@ final class DriveSessionCoordinator {
             pendingSamples.append(sample)
         }
 
-        // Simulated telemetry stops here. It may be journalled, shown live and used to
-        // exercise the insight rules -- that is what the simulator is for -- but it must
-        // never teach DriveLayer what is normal for a real Harrier. Nothing downstream
-        // could tell the difference afterwards: aggregates are merged into the same store
-        // by the same call, and a baseline learned from a scenario would quietly skew
-        // every comparison made against the actual car.
-        guard !telemetry.containsSimulatedData else { return }
-
-        // Baseline observations are filed under the conditions they were taken in.
-        let context = BaselineEngine.context(speedKmh: telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: now),
-                                             engineLoadPercent: telemetry.value(.engineLoadPercent, freshWithin: 20, now: now),
-                                             coolantTemperatureC: telemetry.value(.coolantTemperatureC, freshWithin: 60, now: now),
-                                             gradientPercent: gradient?.percent,
-                                             isEngineRunning: telemetry.isEngineRunning(now: now))
-        for metric in [VehicleMetric.coolantTemperatureC, .controlModuleVoltageV, .engineLoadPercent, .fuelRateLitresPerHour] {
-            guard let value = telemetry.value(metric, freshWithin: 60, now: now) else { continue }
-            BaselineEngine.accumulate(into: &pendingBaselines,
-                                      key: BaselineKey(metric: metric, context: context),
-                                      value: value, at: now)
-            BaselineEngine.accumulate(into: &pendingBaselines,
-                                      key: BaselineKey(metric: metric, context: .any),
-                                      value: value, at: now)
-        }
+        baselineCollector.collect(telemetry, at: now, gradientPercent: gradient?.percent,
+                                  into: &pendingBaselines)
     }
 
     /// Writes the live drive and its telemetry to disk.
@@ -668,10 +649,7 @@ final class DriveSessionCoordinator {
                                                      now: now)
         let economy = FuelIntelligence.bestEconomy(fuelEntries: store.fuelEntries(vehicleID: vehicle.id),
                                                    recentTrips: recentTrips)
-        let levelPercent: Provenanced<Double> = obd.telemetry.value(.fuelLevelPercent, freshWithin: 900, now: now)
-            .map { Provenanced.measured($0, at: now) } ?? .unavailable(basis: obd.isConnected
-                                                                       ? "This vehicle doesn't report tank level."
-                                                                       : "Connect an adapter to read the tank level.")
+        let levelPercent = provenancedReading(.fuelLevelPercent, freshWithin: 120, now: now)
         fuelStatus = FuelIntelligence.status(levelPercent: levelPercent,
                                              tankCapacityLitres: vehicle.tankCapacityLitres(profile: profile),
                                              economy: economy)
@@ -973,7 +951,7 @@ final class DriveSessionCoordinator {
     /// finally to a conservative figure. Never a guess dressed as a measurement — it
     /// only decides which forecast hour to read.
     private func averageSpeedForRouteKmh() -> Double {
-        if let live = obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 30, now: Date()), live > 15 {
+        if let live = obd.telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 30, now: Date()), live > 15 {
             return live
         }
         if let trip = currentTrip, let average = trip.averageSpeedKmh, average > 15 {

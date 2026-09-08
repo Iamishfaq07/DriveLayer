@@ -282,7 +282,7 @@ struct TripRecorder: Sendable {
     /// the two, because `isUsableForRouting` happily passes a pin-sharp fix from ten
     /// minutes ago.
     private func resolvedSpeedKmh(location: GeoPoint?, telemetry: VehicleTelemetry?, now: Date) -> Double? {
-        if let obdSpeed = telemetry?.value(.vehicleSpeedKmh, freshWithin: 6, now: now) {
+        if let obdSpeed = telemetry?.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: now) {
             return obdSpeed
         }
         guard let location, location.isUsableForRouting else { return nil }

@@ -133,6 +133,8 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
     /// a change in this one number is what lets a stored-code refresh be triggered by the
     /// car rather than by the driver opening a screen.
     case monitorStatusCode
+    /// Derived baseline only; never a directly measured OBD PID.
+    case intakeAmbientDeltaC
 
     var displayName: String {
         switch self {
@@ -165,6 +167,7 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .timingAdvanceDegrees: return "Ignition timing"
         case .fuelSystemStatusCode: return "Fuel system status"
         case .monitorStatusCode: return "Monitor status"
+        case .intakeAmbientDeltaC: return "Intake above ambient"
         }
     }
 
@@ -189,6 +192,7 @@ enum VehicleMetric: String, Codable, CaseIterable, Sendable {
         case .timingAdvanceDegrees: return "°"
         case .fuelSystemStatusCode: return ""
         case .monitorStatusCode: return ""
+        case .intakeAmbientDeltaC: return "°C"
         }
     }
 }

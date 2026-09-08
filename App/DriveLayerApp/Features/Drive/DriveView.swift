@@ -16,7 +16,7 @@ struct DriveView: View {
     private var formatter: DisplayFormatter { environment.formatter }
 
     private var speedKmh: Double? {
-        environment.obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: Date())
+        environment.obd.telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: Date())
             ?? environment.location.latest?.speedMetresPerSecond.map(Convert.kmh(fromMetresPerSecond:))
     }
 
@@ -98,7 +98,7 @@ struct DriveView: View {
     /// a few km/h routinely, and a driver who sees the number change character when the
     /// adapter drops deserves to know why.
     private var speedSourceLine: some View {
-        let fromOBD = environment.obd.telemetry.value(.vehicleSpeedKmh, freshWithin: 6, now: Date()) != nil
+        let fromOBD = environment.obd.telemetry.trustedValue(.vehicleSpeedKmh, freshWithin: 6, now: Date()) != nil
         return Text(fromOBD ? "From the vehicle" : "From GPS")
             .font(DL.Font.caption)
             .foregroundStyle(DLColor.secondaryText)
@@ -356,7 +356,7 @@ struct TelemetryDetailView: View {
         let telemetry = environment.obd.telemetry
         let formatter = environment.formatter
         return VehicleMetric.allCases.compactMap { metric -> Row? in
-            guard let value = telemetry.value(metric) else { return nil }
+            guard let value = telemetry.trustedValue(metric, freshWithin: 60, now: Date()) else { return nil }
             let formatted: String?
             switch metric {
             case .coolantTemperatureC, .intakeAirTemperatureC, .ambientAirTemperatureC,

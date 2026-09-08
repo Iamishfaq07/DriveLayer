@@ -104,6 +104,7 @@ enum HyperionGuardian {
                        oilC: Provenanced<Double> = .unavailable(),
                        intakeC: Provenanced<Double> = .unavailable(),
                        ambientC: Double? = nil,
+                       ambientReading: Provenanced<Double>? = nil,
                        speedKmh: Double? = nil,
                        idleSeconds: TimeInterval? = nil,
                        runtimeSeconds: TimeInterval? = nil,
@@ -143,7 +144,7 @@ enum HyperionGuardian {
         // real car, and not before -- guessing at boost is exactly the kind of invented
         // number this product refuses.
         let heatSoak = HeatSoakAnalyser.assess(intakeC: intakeC,
-                                               ambientC: ambientC.map { .measured($0) } ?? .unavailable(),
+                                               ambientC: ambientReading ?? ambientC.map { .measured($0) } ?? .unavailable(),
                                                speedKmh: speedKmh,
                                                idleSeconds: idleSeconds,
                                                peakDeltaC: peakIntakeDeltaC,

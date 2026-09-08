@@ -21,15 +21,8 @@ enum SensorQuality: String, Codable, CaseIterable, Sendable {
 
     /// Whether a value of this quality may drive an assessment, a baseline or a trip.
     ///
-    /// `suspect` passes deliberately. It means "this is the last thing the sensor said
-    /// that made sense", which is materially better than nothing for a coolant
-    /// temperature - and it travels with a basis string saying so.
-    var isActionable: Bool {
-        switch self {
-        case .good, .suspect: return true
-        case .stale, .invalid, .unavailable: return false
-        }
-    }
+    /// Held suspect readings are diagnostic evidence, never live learning inputs.
+    var isActionable: Bool { self == .good }
 
     var label: String {
         switch self {

@@ -19,7 +19,7 @@ final class HeatSoakAnalyserTests: XCTestCase {
     /// Daily values step over a one degree spread, so the 10th-90th percentile band is
     /// narrow but real and `isOutsideUsualRange` means something.
     private func establishedBaseline(around value: Double) -> MetricBaseline {
-        let key = BaselineKey(metric: .intakeAirTemperatureC, context: .idle)
+        let key = BaselineKey(metric: .intakeAmbientDeltaC, context: .idle)
         var aggregates: [BaselineDailyAggregate] = []
         for daysAgo in 0..<30 {
             let day = start.addingTimeInterval(-Double(daysAgo) * 86_400)
