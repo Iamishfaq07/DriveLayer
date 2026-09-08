@@ -218,10 +218,32 @@ final class VehicleHealthTests: XCTestCase {
 
     func testUnsupportedSensorIsExplainedRatherThanShownAsZero() throws {
         let context = InsightContext(now: referenceDate, profile: harrier, isAdapterConnected: true,
-                                     telemetry: telemetry([.engineRPM: 1_500]))
+                                     telemetry: telemetry([.engineRPM: 1_500]),
+                                     capabilities: OBDCapabilityReport(supportedCodes: [0x0C]))
         let report = VehicleHealthEvaluator.evaluate(context)
         let engine = try XCTUnwrap(report.system(.engine))
         XCTAssertEqual(engine.unavailability, .pidNotSupportedByVehicle("Coolant temperature"))
+    }
+
+    func testStaleSensorIsNotCalledUnsupported() throws {
+        var stale = VehicleTelemetry(updatedAt: referenceDate.addingTimeInterval(-600))
+        stale.set(.coolantTemperatureC, value: 90, at: referenceDate.addingTimeInterval(-600))
+        let context = InsightContext(now: referenceDate, profile: harrier, isAdapterConnected: true,
+                                     telemetry: stale,
+                                     capabilities: OBDCapabilityReport(supportedCodes: [0x05]))
+        let engine = try XCTUnwrap(VehicleHealthEvaluator.evaluate(context).system(.engine))
+        guard case .staleSensor = engine.unavailability else {
+            return XCTFail("Expected stale sensor, got \(String(describing: engine.unavailability))")
+        }
+    }
+
+    func testPartialNormalHealthUsesQualifiedHeadline() {
+        let context = InsightContext(now: referenceDate, profile: harrier, isAdapterConnected: true,
+                                     telemetry: telemetry([.coolantTemperatureC: 90, .engineRPM: 1_500]))
+        let report = VehicleHealthEvaluator.evaluate(context)
+        XCTAssertEqual(report.overall, .normal)
+        XCTAssertNotEqual(report.coverage, .full)
+        XCTAssertEqual(report.headline, "Assessed systems look normal")
     }
 
     func testHealthyVehicleRollsUpToNormal() throws {

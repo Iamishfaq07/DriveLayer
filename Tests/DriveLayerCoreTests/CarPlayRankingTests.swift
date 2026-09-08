@@ -15,7 +15,7 @@ final class CarPlayRankingTests: XCTestCase {
         let start = Date(timeIntervalSince1970: 10_000)
         var engine = CarPlayRankingEngine(minimumPresentationLifetime: 20)
         let all = Set(CarPlayTile.allCases)
-        let first = engine.rank(.init(state: .ordinary, available: all), at: start)
+        _ = engine.rank(.init(state: .ordinary, available: all), at: start)
         let urgent = engine.rank(.init(state: .fault, available: all), at: start.addingTimeInterval(5))
         XCTAssertEqual(urgent.first, .fault)
         let held = engine.rank(.init(state: .ordinary, available: all), at: start.addingTimeInterval(6))

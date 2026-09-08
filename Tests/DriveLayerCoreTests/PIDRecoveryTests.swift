@@ -41,7 +41,8 @@ final class PIDRecoveryTests: XCTestCase {
         XCTAssertFalse(initiallyPollable)
         let retryDate = await session.retryDate(for: pid)
         clock.set(try XCTUnwrap(retryDate))
-        XCTAssertEqual(try await session.read(pid).numericValue, 1800)
+        let reading = try await session.read(pid)
+        XCTAssertEqual(reading.numericValue, 1800)
         let recovered = await session.canPoll(pid)
         XCTAssertTrue(recovered)
     }
