@@ -13,6 +13,16 @@ enum DiagnosticRequestStatus: Sendable, Equatable, Codable {
         if case .successful = self { return true }
         return false
     }
+
+    var description: String {
+        switch self {
+        case .notAttempted: return "not attempted"
+        case .successful: return "successful"
+        case .unsupported: return "unsupported"
+        case .unavailable: return "unavailable"
+        case .failed: return "failed"
+        }
+    }
 }
 
 /// A truthful snapshot of the diagnostic scan, including incomplete coverage.
@@ -49,14 +59,23 @@ struct DiagnosticSnapshot: Sendable, Equatable, Codable {
 
     var allCodes: [DiagnosticTroubleCode] { storedCodes + pendingCodes + permanentCodes }
     var statuses: [DiagnosticRequestStatus] { [storedStatus, pendingStatus, permanentStatus] }
-    var isComplete: Bool { statuses.allSatisfy(\.isSuccessful) }
+    var relevantStatuses: [DiagnosticRequestStatus] { statuses.filter { $0 != .unsupported } }
+    var isComplete: Bool { !relevantStatuses.isEmpty && relevantStatuses.allSatisfy(\.isSuccessful) }
     var hasSuccessfulZeroCodeScan: Bool { isComplete && allCodes.isEmpty }
 
     var coverage: Double {
-        Double(statuses.filter { $0.isSuccessful }.count) / Double(statuses.count)
+        guard !relevantStatuses.isEmpty else { return 0 }
+        return Double(relevantStatuses.filter { $0.isSuccessful }.count) / Double(relevantStatuses.count)
     }
 
     var summary: String {
+        if !allCodes.isEmpty {
+            return "\(allCodes.count) diagnostic code\(allCodes.count == 1 ? "" : "s") found"
+                + (isComplete ? "" : " · scan coverage incomplete")
+        }
+        if hasSuccessfulZeroCodeScan && statuses.contains(.unsupported) {
+            return "No diagnostic trouble codes found in supported modes"
+        }
         if hasSuccessfulZeroCodeScan { return "No diagnostic trouble codes found" }
         if statuses.contains(where: { if case .failed = $0 { return true }; return false }) {
             return "Diagnostic scan incomplete"
@@ -64,7 +83,6 @@ struct DiagnosticSnapshot: Sendable, Equatable, Codable {
         if statuses.contains(.unavailable) || statuses.allSatisfy({ $0 == .notAttempted }) {
             return "Diagnostics unavailable"
         }
-        if !allCodes.isEmpty { return "(allCodes.count) diagnostic code\(allCodes.count == 1 ? "" : "s") found" }
         return "Diagnostic scan incomplete"
     }
 }

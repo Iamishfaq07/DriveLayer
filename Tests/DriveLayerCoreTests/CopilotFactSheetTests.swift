@@ -100,8 +100,35 @@ final class CopilotFactSheetTests: XCTestCase {
         XCTAssertTrue(AnswerGuard.isVerified(answer: "Range is 326 km and the tank is 58 percent.", against: sheet))
     }
 
-    func testTroubleCodesAreStatedAsNoneRatherThanLeftOut() {
+    func testUnattemptedDiagnosticsAreNotCalledClean() {
         let snapshot = VehicleContextSnapshot(generatedAt: referenceDate)
-        XCTAssertTrue(CopilotFactSheet.text(from: snapshot).contains("Active trouble codes: none"))
+        XCTAssertTrue(CopilotFactSheet.text(from: snapshot).contains("Diagnostics: not assessed"))
+        XCTAssertFalse(CopilotFactSheet.text(from: snapshot).contains("none"))
+    }
+
+    func testDiagnosticCoverageAndKnownCodesStayExplicit() {
+        for status in [DiagnosticRequestStatus.unavailable, .failed("timeout"), .unsupported] {
+            var snapshot = VehicleContextSnapshot(generatedAt: referenceDate)
+            snapshot.activeTroubleCodes = ["P0300", "P0171"]
+            snapshot.diagnosticSnapshot = DiagnosticSnapshot(storedStatus: .successful,
+                                                              pendingStatus: status,
+                                                              permanentStatus: .successful)
+            let text = CopilotFactSheet.text(from: snapshot)
+            XCTAssertTrue(text.contains("P0300"))
+            XCTAssertTrue(text.contains("P0171"))
+            XCTAssertTrue(text.contains("Pending scan: \(status.description)"))
+            XCTAssertFalse(text.contains("none found"))
+        }
+    }
+
+    func testOnlyCompletedCoveragePermitsNoneFound() {
+        for status in [DiagnosticRequestStatus.notAttempted, .unavailable, .failed("timeout"), .successful, .unsupported] {
+            var snapshot = VehicleContextSnapshot(generatedAt: referenceDate)
+            snapshot.diagnosticSnapshot = DiagnosticSnapshot(storedStatus: .successful,
+                                                              pendingStatus: status,
+                                                              permanentStatus: .successful)
+            XCTAssertEqual(CopilotFactSheet.text(from: snapshot).contains("none found"),
+                           status == .successful || status == .unsupported)
+        }
     }
 }

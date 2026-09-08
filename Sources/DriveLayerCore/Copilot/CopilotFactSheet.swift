@@ -93,10 +93,22 @@ enum CopilotFactSheet {
             lines.append("Usual resting battery voltage: \(number(baseline, digits: 2)) volts")
         }
 
-        if snapshot.activeTroubleCodes.isEmpty {
-            lines.append("Active trouble codes: none")
+        let diagnostics = snapshot.diagnosticSnapshot
+        let knownCodes = Set(snapshot.activeTroubleCodes + diagnostics.allCodes.map(\.code)).sorted()
+        if !knownCodes.isEmpty {
+            lines.append("Known diagnostic trouble codes: \(knownCodes.joined(separator: ", "))")
+        }
+        if diagnostics.hasSuccessfulZeroCodeScan && knownCodes.isEmpty {
+            lines.append("Diagnostic trouble codes: none found in assessed modes")
+        } else if diagnostics.statuses.allSatisfy({ $0 == .notAttempted }) {
+            lines.append("Diagnostics: not assessed")
         } else {
-            lines.append("Active trouble codes: \(snapshot.activeTroubleCodes.joined(separator: ", "))")
+            lines.append("Diagnostics: \(diagnostics.isComplete ? "supported-mode scan complete" : "partial scan")")
+        }
+        for (label, status) in [("Stored", diagnostics.storedStatus),
+                                ("Pending", diagnostics.pendingStatus),
+                                ("Permanent", diagnostics.permanentStatus)] {
+            lines.append("\(label) scan: \(status.description)")
         }
 
         for insight in snapshot.recentInsights {

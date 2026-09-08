@@ -22,7 +22,20 @@ final class DiagnosticSnapshotTests: XCTestCase {
                                           storedStatus: .successful,
                                           pendingStatus: .failed("timeout"),
                                           permanentStatus: .successful)
-        XCTAssertEqual(snapshot.summary, "Diagnostic scan incomplete")
+        XCTAssertEqual(snapshot.summary, "1 diagnostic code found · scan coverage incomplete")
         XCTAssertEqual(snapshot.coverage, 2.0 / 3.0, accuracy: 0.001)
+    }
+
+    func testUnsupportedModesDoNotPreventRelevantCoverage() {
+        let snapshot = DiagnosticSnapshot(storedStatus: .successful, pendingStatus: .successful,
+                                          permanentStatus: .unsupported)
+        XCTAssertTrue(snapshot.isComplete)
+        XCTAssertTrue(snapshot.hasSuccessfulZeroCodeScan)
+        XCTAssertEqual(snapshot.coverage, 1)
+        let unsupported = DiagnosticSnapshot(storedStatus: .unsupported, pendingStatus: .unsupported,
+                                             permanentStatus: .unsupported)
+        XCTAssertFalse(unsupported.isComplete)
+        XCTAssertFalse(unsupported.hasSuccessfulZeroCodeScan)
+        XCTAssertEqual(unsupported.coverage, 0)
     }
 }
