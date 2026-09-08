@@ -308,6 +308,10 @@ actor OBDSession {
             consecutiveTransientFailures[pid] = 0
             return
         }
+        // Polling cooldowns protect the high-frequency Mode 01 loop. Diagnostic
+        // modes are deliberate scans and must remain retryable on each scan: NO DATA
+        // may mean zero codes on one ECU and a fault can appear later in the drive.
+        guard pid.mode == .currentData else { return }
         guard error.isTransient else { return }
         let count = (consecutiveTransientFailures[pid] ?? 0) + 1
         consecutiveTransientFailures[pid] = count

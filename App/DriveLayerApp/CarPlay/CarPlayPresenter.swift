@@ -47,7 +47,7 @@ final class CarPlayPresenter {
     /// Speech capture for the voice entry point. On-device only, and it refuses to
     /// listen at all on a phone that cannot recognise speech locally.
     private let voice = VoiceCapture()
-    private static let listeningStateIdentifier = "listening"
+    private var voiceTemplate: CPVoiceControlTemplate?
 
     /// CarPlay connects on its own scene, so it needs a reference to the running app's
     /// state. This is the one place a shared instance is justified.
@@ -87,6 +87,7 @@ final class CarPlayPresenter {
         refreshTimer = nil
         // The car is gone; a microphone still open would have nothing to show for it.
         voice.cancel()
+        voiceTemplate = nil
     }
 
     // MARK: - Building
@@ -386,21 +387,28 @@ final class CarPlayPresenter {
     @available(iOS 27.0, *)
     private func listen() {
         guard let environment else { return }
-        let listening = CPVoiceControlState(identifier: Self.listeningStateIdentifier,
-                                            titleVariants: ["Listening…", "Listening"],
-                                            image: nil,
-                                            repeats: false)
-        let template = CPVoiceControlTemplate(voiceControlStates: [listening])
+        let states = CarPlayVoiceState.allCases.map {
+            CPVoiceControlState(identifier: $0.rawValue,
+                                titleVariants: $0.titleVariants,
+                                image: nil,
+                                repeats: false)
+        }
+        let template = CPVoiceControlTemplate(voiceControlStates: states)
+        voiceTemplate = template
         interfaceController.presentTemplate(template, animated: true, completion: nil)
 
         Task { @MainActor in
             let unavailable = await voice.start { [weak self] transcript in
+                self?.voiceTemplate?.activateVoiceControlState(withIdentifier: CarPlayVoiceState.understanding.rawValue)
                 self?.answerSpoken(transcript, environment: environment)
+            } onFailure: { [weak self] failure in
+                self?.finishVoiceInteraction(title: "Couldn't hear you", message: failure.message)
             }
             if let unavailable {
                 // Nothing is listening, so the template would be a lie. Take it down
                 // and say why in the same breath.
                 interfaceController.dismissTemplate(animated: true, completion: nil)
+                voiceTemplate = nil
                 presentInformation(title: "Can't listen", lines: [unavailable.message])
             }
         }
@@ -417,10 +425,19 @@ final class CarPlayPresenter {
         let snapshot = environment.drive.copilotSnapshot()
         Task { @MainActor in
             let answer = try? await FoundationModelsCopilot().answer(question: question, snapshot: snapshot)
+            voiceTemplate?.activateVoiceControlState(withIdentifier: CarPlayVoiceState.answering.rawValue)
             interfaceController.dismissTemplate(animated: true, completion: nil)
+            voiceTemplate = nil
             presentInformation(title: question,
                                lines: [answer?.spokenText ?? "I couldn't work that one out. Try one of the questions in the list."])
         }
+    }
+
+    @available(iOS 27.0, *)
+    private func finishVoiceInteraction(title: String, message: String) {
+        interfaceController.dismissTemplate(animated: true, completion: nil)
+        voiceTemplate = nil
+        presentInformation(title: title, lines: [message])
     }
 
     // MARK: - Critical alert
